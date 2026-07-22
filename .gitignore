@@ -1,0 +1,26 @@
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Credentials
+credentials.json
+*.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Streamlit logs
+.streamlit/logs/
+
+# Local workbook
+sample_workbook.xlsx
