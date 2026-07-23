@@ -289,7 +289,10 @@ params contains:
     "Allow new suggestions"
     "Suggest new options only"
 - notes: free‑form text describing additional preferences
-- location_anchor: always "West County Center, St. Louis"
+- location_anchor: the user's chosen home base for distance estimates
+  (e.g. a mall, neighborhood, or address near where they live/shop).
+  Always use this value from params -- do not assume any specific
+  location.
 
 INTERPRETATION RULES
 - Treat cuisines as inclusive filters.
@@ -307,7 +310,9 @@ Existing options come from meals_df where Category = "Takeout".
 For each existing option:
 - Use Cuisine, Healthy, Taste, Stretchiness, Cost per Serving, Drive‑Thru, Delivery.
 - Distance must be estimated using common‑sense reasoning:
-  - Assume all existing takeout options are within a 15‑minute drive unless the cuisine or chain is implausible for St. Louis.
+  - Assume all existing takeout options are within a 15‑minute drive of
+    params.location_anchor unless the cuisine or chain is implausible
+    for that area.
   - If implausible, set Distance = "Unknown" and lower ranking.
 
 ------------------------------------------------------------
@@ -319,10 +324,10 @@ You may generate new takeout suggestions ONLY when:
 - OR source_pref = "Suggest new options only"
 
 NEW OPTION RULES
-- Must be within a 15‑minute drive of West County Center, St. Louis.
+- Must be within a 15‑minute drive of params.location_anchor.
 - Use real restaurants or plausible local chains.
 - Do NOT hallucinate restaurants that do not exist.
-- If unsure whether a restaurant exists, choose a well‑known chain that plausibly has a location near West County Center.
+- If unsure whether a restaurant exists, choose a well‑known chain that plausibly has a location near params.location_anchor.
 - Provide Cuisine, Attributes, and Distance (estimate using common‑sense).
 - Reasoning must explain why it fits the user’s preferences.
 
@@ -433,7 +438,7 @@ For new suggestions:
   - Stretchiness: estimate based on dish type.
   - Taste: estimate based on general reputation.
 - Never hallucinate restaurants that do not exist.
-- Prefer well-known chains or real local restaurants within 15 minutes of West County Center.
+- Prefer well-known chains or real local restaurants within 15 minutes of params.location_anchor.
 
 ------------------------------------------------------------
 FINAL OUTPUT
@@ -512,12 +517,19 @@ END OF SYSTEM PROMPT
 # ------------------------------------------------------------
 
 @st.cache_data()
-def generate_plan(params: dict, workbook_json: dict):
+def def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM with:
     - system prompt
     - params JSON
     - workbook JSON
+
+    - optional feedback text (revision request on a previously generated plan)
+
+    cache_bust is not sent to the LLM -- it only exists so that clicking
+    "Generate Plan" again with identical params/feedback produces a fresh
+    call instead of silently returning the same cached plan. Pass an
+    incrementing counter (e.g. from session_state) from the caller.
 
     Returns:
     - selected_df (pandas DataFrame)
@@ -540,6 +552,15 @@ def generate_plan(params: dict, workbook_json: dict):
                        json.dumps(workbook_json, indent=2)
         }
     ]
+
+    if feedback:
+      messages.append({
+        "role": "user",
+        "content": "Here is the user's feedback on the previous plan. "
+                    "Reinterpret it as updated constraints, keeping all "
+                    "other rules in this system prompt intact, and return "
+                    "a revised plan using the same schema:\n" + feedback
+      })
 
     # IMPORTANT: use Streamlit secrets
     client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])

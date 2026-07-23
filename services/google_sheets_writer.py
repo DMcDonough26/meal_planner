@@ -48,7 +48,6 @@ def write_plan_to_google_sheets(
     grocery_df: pd.DataFrame,
     params: dict
 ):
-    st.write("DEBUG: write_plan_to_google_sheets CALLED")
 
     # ---------------------------------------------------------
     # Compute weekday mapping based on plan_start_day

@@ -150,7 +150,11 @@ def render_plan_page():
             "history": history_df.to_dict(orient="records")
         }
 
-        selected_df, plan_df = generate_plan(params, workbook_json)
+        selected_df, plan_df = generate_plan(
+            params,
+            workbook_json,
+            cache_bust=st.session_state.get("plan_regen_counter", 0),
+        )
 
         # ---------------------------------------------------------
         # Always include the Staples meal
@@ -267,7 +271,47 @@ def render_plan_page():
 
     with col1:
         if st.button("Apply Changes"):
-            st.success("Your request has been recorded.")
+            if not adjustment_request.strip():
+                st.warning("Enter a change request above before applying.")
+            else:
+                st.session_state.plan_regen_counter = (
+                    st.session_state.get("plan_regen_counter", 0) + 1
+                )
+
+                planner_meals_df = filter_meals_for_planner(meals_df)
+                revise_workbook_json = {
+                    "meals": planner_meals_df.to_dict(orient="records"),
+                    "recipes": recipes_df.to_dict(orient="records"),
+                    "history": history_df.to_dict(orient="records")
+                }
+
+                revised_selected_df, revised_plan_df = generate_plan(
+                    params,
+                    revise_workbook_json,
+                    feedback=adjustment_request,
+                    cache_bust=st.session_state.plan_regen_counter,
+                )
+
+                staples_row = meals_df[meals_df["Meal Name"] == "Staples"].copy()
+                if not staples_row.empty:
+                    staples_row["Scale Factor"] = 1
+                    revised_selected_df = pd.concat(
+                        [revised_selected_df, staples_row], ignore_index=True
+                    )
+
+                revised_scaled_df = build_scaled_df(revised_selected_df, recipes_df, params)
+                revised_grocery_df = build_grocery_df(revised_scaled_df, params, store_layout_df)
+
+                st.session_state.plan_data = {
+                    "plan_df": revised_plan_df,
+                    "scaled_df": revised_scaled_df,
+                    "grocery_df": revised_grocery_df,
+                   "selected_df": revised_selected_df,
+                    "params": params,
+                }
+
+                st.success("Plan updated based on your feedback.")
+                st.rerun()
 
     with col2:
         save_clicked = st.button("Save Plan to Google Sheets")

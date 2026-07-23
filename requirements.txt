@@ -1,3 +1,6 @@
 streamlit
 pandas
 openpyxl
+openai
+gspread
+google-auth

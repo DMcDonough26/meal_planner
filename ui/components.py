@@ -114,6 +114,7 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
 
     if st.sidebar.button("Generate Plan"):
         st.session_state.generate_plan = True
+        st.session_state.plan_regen_counter = st.session_state.get("plan_regen_counter", 0) + 1
 
     # -----------------------------
     # Section: Calculate
@@ -155,6 +156,14 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
 
 def takeout_controls(meals_df):
     st.sidebar.header("Takeout Preferences")
+
+    # -----------------------------
+    # Location anchor
+    # -----------------------------
+    location_anchor = st.sidebar.text_input(
+        "Location (for distance estimates)",
+        value="West County Center, St. Louis"
+    )
 
     # -----------------------------
     # How many recommendations?
@@ -227,6 +236,7 @@ def takeout_controls(meals_df):
         "stretchy": stretchy,
         "source_pref": source_pref,
         "notes": notes,
+        "location_anchor": location_anchor,
         "generate": generate
     }
 
