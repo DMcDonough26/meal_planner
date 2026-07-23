@@ -517,7 +517,7 @@ END OF SYSTEM PROMPT
 # ------------------------------------------------------------
 
 @st.cache_data()
-def def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None, cache_bust: int = 0):
+def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM with:
     - system prompt
@@ -564,23 +564,6 @@ def def generate_plan(params: dict, workbook_json: dict, feedback: str | None = 
 
     # IMPORTANT: use Streamlit secrets
     client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
-
-    # response = client.chat.completions.create(
-    #     model="gpt-4o-mini",
-    #     messages=messages,
-    #     temperature=0.0
-    # )
-
-    # response = client.chat.completions.create(
-    #     model="gpt-5.4-mini",
-    #     messages=messages,
-    #     temperature=0.0
-    # )
-
-    # response = client.chat.completions.create(
-    #     model="gpt-5.5",
-    #     messages=messages
-    # )
 
     response = client.chat.completions.create(
         model="gpt-5.6-terra",
@@ -655,9 +638,8 @@ def generate_takeout_recommendations(params: dict, meals_df_json: str, feedback:
     client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.0
+        model="gpt-5.6-terra",
+        messages=messages
     )
 
     raw_output = response.choices[0].message.content
