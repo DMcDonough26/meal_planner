@@ -72,6 +72,8 @@ MEAL SLOTS
 - Use the meal slots provided in params.
 - If the workbook does not specify slot eligibility, infer it using common‑sense culinary reasoning.
 - Do not assign meals to inappropriate slots (e.g., shrimp scampi for breakfast).
+- Do not assign the same Meal ID to more than one slot on the same day
+  (e.g., lunch and dinner on the same day must be different meals).
 
 SERVINGS
 - Use servings_per_meal from params.
@@ -89,6 +91,10 @@ Bulk COOKS
   Valid values: 1.0, 1.5, 2.0
 - Never exceed 2.0 scale factor (physical pot constraint).
 - Bulk cooks produce leftovers that should be eaten throughout the week.
+- HARD CAP: a single bulk-cook Meal ID may appear in plan_df on at most
+  4 total days -- the cook day itself plus the 3-day leftover expiration
+  window (see Section 7). Do not exceed this cap even if stretchiness,
+  scale factor, or servings math would suggest more uses are possible.
 
 SOUPER CUBE MEALS
 - Defined as: category = bulk AND freezable = 1
@@ -214,6 +220,20 @@ Each list contains row objects matching the canonical schemas exactly.
 Do NOT return scaled_df or grocery_df.
 Do NOT invent columns.
 Do NOT omit required columns.
+
+------------------------------------------------------------
+SECTION 8.5 — SELF-CHECK BEFORE RETURNING
+------------------------------------------------------------
+
+Before returning your final output, verify all of the following. If any
+check fails, revise the plan before responding -- do not return a plan
+that fails these checks:
+
+1. No bulk-cook Meal ID appears in plan_df on more than 4 total days.
+2. No frozen-leftover Meal ID appears on more than 2 total days.
+3. No quick-meal Meal ID appears more than once.
+4. Takeout appears on at most 1 day.
+5. No Meal ID is assigned to two slots on the same day.
 
 ------------------------------------------------------------
 SECTION 9 — ERROR HANDLING
@@ -524,10 +544,26 @@ def generate_plan(params: dict, workbook_json: dict):
     # IMPORTANT: use Streamlit secrets
     client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
 
+    # response = client.chat.completions.create(
+    #     model="gpt-4o-mini",
+    #     messages=messages,
+    #     temperature=0.0
+    # )
+
+    # response = client.chat.completions.create(
+    #     model="gpt-5.4-mini",
+    #     messages=messages,
+    #     temperature=0.0
+    # )
+
+    # response = client.chat.completions.create(
+    #     model="gpt-5.5",
+    #     messages=messages
+    # )
+
     response = client.chat.completions.create(
-        model="gpt-5.5",
-        messages=messages#,
-        # temperature=0.0
+        model="gpt-5.6-terra",
+        messages=messages
     )
 
     raw_output = response.choices[0].message.content.strip()

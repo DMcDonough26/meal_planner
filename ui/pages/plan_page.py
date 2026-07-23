@@ -8,6 +8,11 @@ from ui.components import (
 )
 from services.llm_client import generate_plan
 
+from services.meal_filters import (
+    filter_meals_for_planner,
+    filter_meal_names_for_recipe_cards,
+)
+
 from services.google_sheets_loader import load_workbook
 from services.google_sheets_writer import write_plan_to_google_sheets
 
@@ -51,7 +56,7 @@ def build_scaled_df(selected_df, recipes_df, params):
     return merged[cols]
 
 
-def build_grocery_df(scaled_df, params):
+def build_grocery_df(scaled_df, params, store_layout_df):
     # Group by ingredient + section + unit + store + ingredient ID
     grouped = (
         scaled_df.groupby(
@@ -66,6 +71,23 @@ def build_grocery_df(scaled_df, params):
 
     # Rename aggregated meal names column
     grouped = grouped.rename(columns={"Meal Name": "Meal Names"})
+
+    # ---------------------------------------------------------
+    # Bring in aisle order from Store Layout (one row per Store + Section)
+    # ---------------------------------------------------------
+    store_sections = store_layout_df[
+        store_layout_df["Store"] == params["store_name"]
+    ][["Section", "Order Number"]]
+
+    grouped = grouped.merge(store_sections, on="Section", how="left")
+
+    # Sections with no match in Store Layout (typo, or a new Section not yet
+    # mapped for this store) sort to the end rather than silently reordering
+    # or raising, so they're still visible on the list -- just ungrouped by aisle.
+    grouped = grouped.sort_values(
+        by=["Order Number", "Section", "Ingredient Name"],
+        na_position="last"
+    ).reset_index(drop=True)
 
     return grouped
 
@@ -121,8 +143,9 @@ def render_plan_page():
     # Generate plan only when flag is set
     # ---------------------------------------------------------
     if st.session_state.generate_plan:
+        planner_meals_df = filter_meals_for_planner(meals_df)
         workbook_json = {
-            "meals": meals_df.to_dict(orient="records"),
+            "meals": planner_meals_df.to_dict(orient="records"),  # was meals_df
             "recipes": recipes_df.to_dict(orient="records"),
             "history": history_df.to_dict(orient="records")
         }
@@ -140,7 +163,7 @@ def render_plan_page():
 
 
         scaled_df = build_scaled_df(selected_df, recipes_df, params)
-        grocery_df = build_grocery_df(scaled_df, params)
+        grocery_df = build_grocery_df(scaled_df, params, store_layout_df)
 
 
         st.session_state.plan_data = {
@@ -174,7 +197,11 @@ def render_plan_page():
     with tab_recipes:
         st.markdown("### Recipes in This Plan")
 
-        for recipe_name in scaled_df["Meal Name"].unique():
+        card_meal_names = filter_meal_names_for_recipe_cards(
+            scaled_df["Meal Name"].unique(), meals_df
+        )
+
+        for recipe_name in card_meal_names:
             meta = meals_df[meals_df["Meal Name"] == recipe_name].iloc[0]
 
             scale_factor = selected_df[selected_df["Meal Name"] == recipe_name]["Scale Factor"].iloc[0]

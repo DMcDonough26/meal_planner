@@ -102,6 +102,7 @@ def write_plan_to_google_sheets(
         "Plan Date": plan_date,
         "Store": grocery_df["Store"],
         "Section": grocery_df["Section"],
+        "Order Number": grocery_df.get("Order Number", ""),   # new
         "Ingredient ID": grocery_df.get("Ingredient ID", ""),
         "Ingredient Name": grocery_df["Ingredient Name"],
         "Scaled Display Quantity": grocery_df["Scaled Display Quantity"],
