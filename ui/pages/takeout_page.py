@@ -44,10 +44,15 @@ def render_takeout_page():
         st.info("Use the controls in the sidebar and click **Recommend Takeout**.")
         return
 
+    api_key = st.session_state.get("openai_api_key")
+    if not api_key:
+        st.error("Enter your OpenAI API key in the sidebar to get recommendations.")
+        return
+
     takeout_df = meals_df[meals_df["Category"] == "Takeout"]
     meals_df_json = takeout_df.to_json(orient="records")
 
-    recommendations = generate_takeout_recommendations(params, meals_df_json)
+    recommendations = generate_takeout_recommendations(params, meals_df_json, api_key=api_key)
 
 
     st.markdown("### Recommended Takeout Options")
@@ -78,9 +83,15 @@ def render_takeout_page():
     apply_changes = st.button("Apply Changes")
 
     if apply_changes:
+
+        if not api_key:
+            st.error("Enter your OpenAI API key in the sidebar to apply changes.")
+            return
+
         updated_recommendations = generate_takeout_recommendations(
             params,
             meals_df_json,
+            api_key=api_key,
             feedback=adjust_text
         )
 

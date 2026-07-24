@@ -16,6 +16,8 @@ from services.meal_filters import (
 from services.google_sheets_loader import load_workbook
 from services.google_sheets_writer import write_plan_to_google_sheets
 
+from config.constants import is_owner_mode
+
 
 def build_scaled_df(selected_df, recipes_df, params):
     # Merge selected meals (with scale factor) onto the base recipe/ingredient rows
@@ -143,6 +145,12 @@ def render_plan_page():
     # Generate plan only when flag is set
     # ---------------------------------------------------------
     if st.session_state.generate_plan:
+        api_key = st.session_state.get("openai_api_key")
+        if not api_key:
+            st.error("Enter your OpenAI API key in the sidebar to generate a plan.")
+            st.session_state.generate_plan = False
+            return
+
         planner_meals_df = filter_meals_for_planner(meals_df)
         workbook_json = {
             "meals": planner_meals_df.to_dict(orient="records"),  # was meals_df
@@ -153,6 +161,7 @@ def render_plan_page():
         selected_df, plan_df = generate_plan(
             params,
             workbook_json,
+            api_key=api_key,
             cache_bust=st.session_state.get("plan_regen_counter", 0),
         )
 
@@ -195,7 +204,9 @@ def render_plan_page():
     # ---------------------------------------------------------
     # Tabs
     # ---------------------------------------------------------
-    tab_recipes, tab_plan = st.tabs(["📘 Recipes", "📅 Meal Plan"])
+    tab_recipes, tab_plan, tab_grocery = st.tabs(
+        ["📘 Recipes", "📅 Meal Plan", "🛒 Grocery List"]
+    )
 
     # --- Recipes Tab ---
     with tab_recipes:
@@ -256,6 +267,29 @@ def render_plan_page():
                     st.markdown(f"**{icon} {row['Meal Slot']}**")
                     st.markdown(row["Meal Name"])
 
+
+    # --- Grocery List Tab ---
+    with tab_grocery:
+        st.markdown("### Grocery List")
+        st.caption("Sorted by aisle order for your selected store.")
+
+        display_cols = [
+            "Section", "Ingredient Name", "Scaled Display Quantity",
+            "Display Unit", "Meal Names"
+        ]
+        st.dataframe(
+            grocery_df[display_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.download_button(
+            "Download Grocery List (CSV)",
+            grocery_df[display_cols].to_csv(index=False),
+            file_name="grocery_list.csv",
+            mime="text/csv",
+        )
+
     # ---------------------------------------------------------
     # Footer
     # ---------------------------------------------------------
@@ -271,8 +305,12 @@ def render_plan_page():
 
     with col1:
         if st.button("Apply Changes"):
+            api_key = st.session_state.get("openai_api_key")
+
             if not adjustment_request.strip():
                 st.warning("Enter a change request above before applying.")
+            elif not api_key:
+                st.error("Enter your OpenAI API key in the sidebar to apply changes.")            
             else:
                 st.session_state.plan_regen_counter = (
                     st.session_state.get("plan_regen_counter", 0) + 1
@@ -288,6 +326,7 @@ def render_plan_page():
                 revised_selected_df, revised_plan_df = generate_plan(
                     params,
                     revise_workbook_json,
+                    api_key=api_key,
                     feedback=adjustment_request,
                     cache_bust=st.session_state.plan_regen_counter,
                 )
@@ -314,7 +353,17 @@ def render_plan_page():
                 st.rerun()
 
     with col2:
-        save_clicked = st.button("Save Plan to Google Sheets")
+        if is_owner_mode():
+            save_clicked = st.button("Save Plan to Google Sheets")
+        else:
+            save_clicked = False
+            st.download_button(
+                "Download Plan (CSV)",
+                plan_df.to_csv(index=False),
+                file_name="meal_plan.csv",
+                mime="text/csv",
+            )
+            st.caption("Public visitors get a download instead of writing to the owner's sheet.")
 
     if save_clicked:
         write_plan_to_google_sheets(plan_df, scaled_df, grocery_df, params)

@@ -2,6 +2,7 @@ import streamlit as st
 from ui.pages.plan_page import render_plan_page
 from ui.pages.takeout_page import render_takeout_page
 
+from ui.components import openai_api_key_input
 
 st.set_page_config(
     page_title="Meal Planner",
@@ -16,6 +17,14 @@ def main():
         ["Plan", "Takeout"]
     )
 
+    with st.sidebar.expander("Owner Access"):
+        passcode = st.text_input("Owner passcode", type="password", key="owner_passcode_input")
+        if passcode and passcode == st.secrets.get("OWNER_PASSCODE"):
+            st.session_state["owner_unlocked"] = True
+        if st.session_state.get("owner_unlocked"):
+            st.success("Owner mode unlocked for this session.")
+
+    st.session_state["openai_api_key"] = openai_api_key_input()
 
     if page == "Plan":
         render_plan_page()

@@ -517,7 +517,7 @@ END OF SYSTEM PROMPT
 # ------------------------------------------------------------
 
 @st.cache_data()
-def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None, cache_bust: int = 0):
+def generate_plan(params: dict, workbook_json: dict, api_key: str, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM with:
     - system prompt
@@ -525,6 +525,11 @@ def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None
     - workbook JSON
 
     - optional feedback text (revision request on a previously generated plan)
+
+    api_key is the caller's own OpenAI API key (owner's, in owner mode, or
+    a visitor's own key in the public deployment) -- this function never
+    falls back to st.secrets itself, so a missing key always surfaces as
+    an explicit error rather than silently charging the owner's account.
 
     cache_bust is not sent to the LLM -- it only exists so that clicking
     "Generate Plan" again with identical params/feedback produces a fresh
@@ -562,8 +567,10 @@ def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None
                     "a revised plan using the same schema:\n" + feedback
       })
 
-    # IMPORTANT: use Streamlit secrets
-    client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
+    if not api_key:
+        raise ValueError("An OpenAI API key is required to generate a plan.")
+
+    client = OpenAI(api_key=api_key)
 
     response = client.chat.completions.create(
         model="gpt-5.6-terra",
@@ -599,7 +606,7 @@ def generate_plan(params: dict, workbook_json: dict, feedback: str | None = None
     
 
 @st.cache_data()
-def generate_takeout_recommendations(params: dict, meals_df_json: str, feedback: str | None = None):
+def generate_takeout_recommendations(params: dict, meals_df_json: str, api_key: str, feedback: str | None = None):
     """
     Calls the LLM with:
     - takeout system prompt
@@ -634,8 +641,10 @@ def generate_takeout_recommendations(params: dict, meals_df_json: str, feedback:
             "content": "Here is the user's feedback:\n" + feedback
         })
 
-    # IMPORTANT: use Streamlit secrets
-    client = OpenAI(api_key=st.secrets["openai"]["OPENAI_API_KEY"])
+    if not api_key:
+        raise ValueError("An OpenAI API key is required to generate takeout recommendations.")
+
+    client = OpenAI(api_key=api_key)
 
     response = client.chat.completions.create(
         model="gpt-5.6-terra",

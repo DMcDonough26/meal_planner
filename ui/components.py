@@ -1,6 +1,36 @@
 import streamlit as st
 import pandas as pd
 
+from config.constants import is_owner_mode
+
+
+def openai_api_key_input():
+    """
+    Sidebar field for the OpenAI API key. Pre-fills from st.secrets only
+    in owner mode -- public visitors always see a blank, required field,
+    and the app never falls back to the owner's key on their behalf.
+    """
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("OpenAI API Key")
+
+    default_key = ""
+    if is_owner_mode():
+        default_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", "")
+
+    api_key = st.sidebar.text_input(
+        "Enter your OpenAI API key",
+        value=default_key,
+        type="password",
+        help="Used only for this session's requests -- never stored or logged."
+    )
+
+    if not api_key:
+        st.sidebar.warning(
+            "An OpenAI API key is required to generate a plan or takeout recommendations."
+        )
+
+    return api_key or None
+
 def sidebar_section(title: str):
     st.sidebar.markdown(f"### {title}")
     st.sidebar.markdown("---")
