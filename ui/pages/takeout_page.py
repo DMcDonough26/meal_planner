@@ -23,23 +23,6 @@ def render_takeout_page():
 
     params = takeout_controls(meals_df)
 
-    # ---------------------------------------------------------
-    # Debug panel (main page)
-    # ---------------------------------------------------------
-    if st.checkbox("Show Debug Data"):
-        st.subheader("Params JSON")
-        st.code(params)
-
-        st.subheader("Takeout Meals JSON")
-        takeout_df = meals_df[meals_df["Category"] == "Takeout"]
-        st.code(takeout_df.to_dict(orient="records"))
-
-        st.subheader("Full Meals JSON (optional)")
-        st.code(meals_df.to_dict(orient="records"))
-
-        st.subheader("Notes")
-        st.code(params.get("notes", ""))
-
     if not params["generate"]:
         st.info("Use the controls in the sidebar and click **Recommend Takeout**.")
         return
