@@ -137,7 +137,7 @@ def render_plan_page():
     # ---------------------------------------------------------
     # If user has not clicked Generate Plan yet
     # ---------------------------------------------------------
-    if "generate_plan" not in st.session_state:
+    if "plan_data" not in st.session_state and not st.session_state.get("generate_plan"):
         st.info("Use the controls in the sidebar and click **Generate Plan** to generate your weekly plan.")
         return
 
@@ -158,12 +158,15 @@ def render_plan_page():
             "history": history_df.to_dict(orient="records")
         }
 
-        selected_df, plan_df = generate_plan(
-            params,
-            workbook_json,
-            api_key=api_key,
-            cache_bust=st.session_state.get("plan_regen_counter", 0),
-        )
+        try:
+            selected_df, plan_df = generate_plan(
+                params, workbook_json, api_key=api_key,
+                cache_bust=st.session_state.get("plan_regen_counter", 0),
+            )
+        except Exception as e:
+            st.error(f"Couldn't generate a plan: {e}")
+            st.session_state.generate_plan = False
+            return
 
         # ---------------------------------------------------------
         # Always include the Staples meal
@@ -323,13 +326,19 @@ def render_plan_page():
                     "history": history_df.to_dict(orient="records")
                 }
 
-                revised_selected_df, revised_plan_df = generate_plan(
-                    params,
-                    revise_workbook_json,
-                    api_key=api_key,
-                    feedback=adjustment_request,
-                    cache_bust=st.session_state.plan_regen_counter,
-                )
+                try:
+                    revised_selected_df, revised_plan_df = generate_plan(
+                        params,
+                        revise_workbook_json,
+                        api_key=api_key,
+                        feedback=adjustment_request,
+                        cache_bust=st.session_state.plan_regen_counter,
+                    )
+                except Exception as e:
+                    st.error(f"Couldn't generate a plan: {e}")
+                    st.session_state.generate_plan = False
+                    return
+
 
                 staples_row = meals_df[meals_df["Meal Name"] == "Staples"].copy()
                 if not staples_row.empty:
