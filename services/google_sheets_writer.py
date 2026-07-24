@@ -27,14 +27,19 @@ def _get_sheet(tab_name: str):
 
 def _overwrite_sheet(sheet, df: pd.DataFrame):
     """Clear a sheet and write header + rows from a DataFrame."""
-    sheet.clear()
     header = list(df.columns)
-    rows = df.astype(str).values.tolist()
+    # fillna first: NaN/None (e.g. an unmatched Store Layout section's blank
+    # Order Number) is not valid JSON and gets rejected client-side by the
+    # Sheets API client -- turning it into an empty string keeps that safe.
+    rows = df.fillna("").astype(str).values.tolist()
+    # Only clear once the payload is known-good, so a bad value can't leave
+    # the sheet wiped with nothing written back in its place.
+    sheet.clear()
     sheet.update([header] + rows)
 
 def _append_rows(sheet, df: pd.DataFrame):
     """Append DataFrame rows to the bottom of a sheet."""
-    rows = df.astype(str).values.tolist()
+    rows = df.fillna("").astype(str).values.tolist()
     for row in rows:
         sheet.append_row(row)
 

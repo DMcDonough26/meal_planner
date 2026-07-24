@@ -19,8 +19,11 @@ def main():
 
     with st.sidebar.expander("Owner Access"):
         passcode = st.text_input("Owner passcode", type="password", key="owner_passcode_input")
-        if passcode and passcode == st.secrets.get("OWNER_PASSCODE"):
-            st.session_state["owner_unlocked"] = True
+        if passcode:
+            if passcode == st.secrets.get("OWNER_PASSCODE"):
+                st.session_state["owner_unlocked"] = True
+            elif not st.session_state.get("owner_unlocked"):
+                st.error("Incorrect passcode.")
         if st.session_state.get("owner_unlocked"):
             st.success("Owner mode unlocked for this session.")
 
