@@ -114,14 +114,6 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
         default=["Any"]
     )
 
-    recipe_source = st.sidebar.selectbox(
-        "Recipe source",
-        [
-            "Existing recipes only",
-            "Allow new recipes",
-            "Suggest new recipes"
-        ]
-    )
 
     st.sidebar.markdown("")
 
@@ -173,7 +165,6 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
         "bulk_cooks": bulk_cooks,
         "priorities": priorities,
         "cuisine": cuisine,
-        "recipe_source": recipe_source,
         "souper_target": souper_target,
         "store_name": store_name,
         "notes": notes,
@@ -236,8 +227,7 @@ def takeout_controls(meals_df):
         "Where should recommendations come from?",
         [
             "Existing takeout options only",
-            "Allow new suggestions",
-            "Suggest new options only"
+            "New suggestions only"
         ]
     )
 
@@ -298,3 +288,58 @@ def recipe_card(recipe_name: str, metadata: dict):
         for i, (key, value) in enumerate(metadata.items()):
             with cols[i % 2]:
                 st.markdown(f"**{key}:** {value}")
+
+def recipe_ideas_controls(meals_df):
+    """
+    Sidebar controls for the Recipe Ideas page. Deliberately lighter than
+    planning_controls -- this mode doesn't need days/servings/bulk-cook
+    params, since ideas aren't scaled or turned into a grocery list.
+    """
+    st.sidebar.header("Recipe Idea Preferences")
+
+    cuisines = st.sidebar.multiselect(
+        "Cuisines you're interested in",
+        sorted(meals_df["Cuisine"].dropna().unique().tolist())
+    )
+
+    ingredients_on_hand = st.sidebar.text_area(
+        "Ingredients you'd like to use (optional)",
+        placeholder="e.g. chicken thighs, fresh basil, canned chickpeas"
+    )
+
+    num_ideas = st.sidebar.number_input(
+        "How many ideas?",
+        min_value=1,
+        max_value=10,
+        value=3
+    )
+
+    notes = st.sidebar.text_area(
+        "Anything else? (optional)",
+        placeholder="e.g. nothing too spicy, quick weeknight options, vegetarian"
+    )
+
+    generate = st.sidebar.button("Suggest Recipe Ideas")
+
+    return {
+        "cuisines": cuisines,
+        "ingredients_on_hand": ingredients_on_hand,
+        "num_ideas": num_ideas,
+        "notes": notes,
+        "generate": generate
+    }
+
+
+def recipe_idea_card(name: str, source: str, link, blurb: str):
+    """
+    Render a recipe-idea suggestion card. Unlike recipe_card, this has no
+    numeric cookbook metadata -- ideas are idea-only (see
+    RECIPE_IDEAS_SYSTEM_PROMPT), so the card is title + source + optional
+    link + a free-text blurb instead of a label/value grid.
+    """
+    with st.container(border=True):
+        st.markdown(f"#### {name}")
+        st.caption(f"Source: {source}")
+        if link:
+            st.markdown(f"[View recipe]({link})")
+        st.write(blurb)

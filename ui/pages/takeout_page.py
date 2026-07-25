@@ -46,17 +46,22 @@ def render_takeout_page():
     st.markdown("### Recommended Takeout Options")
 
     for rec in recommendations:
-        recipe_card(
-            rec["Name"],
-            {
-                "Cuisine": rec["Cuisine"],
-                "Status": rec["Type"],
-                "Attributes": ", ".join(rec["Attributes"]),
-                "Distance": rec["Distance"],
-                "Reasoning": rec["Reasoning"]
-            }
-        )
-        st.markdown("")
+            recipe_card(
+                rec["Name"],
+                {
+                    "Cuisine": rec["Cuisine"],
+                    "Status": rec["Type"],
+                    "Stretchiness": rec["Stretchiness"],
+                    "Healthy": rec["Healthy"],
+                    "Taste": rec["Taste"],
+                    "Cost per Serving": rec["Cost per Serving"],
+                    "Drive-Thru": rec["Drive-Thru"],
+                    "Delivery": rec["Delivery"],
+                    "Pickup Time": rec["Pickup Time"],
+                    "Reasoning": rec["Reasoning"]
+                }
+            )
+            st.markdown("")
 
 
     # --- Adjustment Box (LLM-ready) ---
@@ -97,8 +102,13 @@ def render_takeout_page():
                 {
                     "Cuisine": rec["Cuisine"],
                     "Status": rec["Type"],
-                    "Attributes": ", ".join(rec["Attributes"]),
-                    "Distance": rec["Distance"],
+                    "Stretchiness": rec["Stretchiness"],
+                    "Health": rec["Healthy"],
+                    "Taste": rec["Taste"],
+                    "Cost per Serving": rec["Cost per Serving"],
+                    "Drive-Thru": rec["Drive-Thru"],
+                    "Delivery": rec["Delivery"],
+                    "Pickup Time": rec["Pickup Time"],
                     "Reasoning": rec["Reasoning"]
                 }
             )
