@@ -2,6 +2,8 @@ import streamlit as st
 from ui.pages.plan_page import render_plan_page
 from ui.pages.takeout_page import render_takeout_page
 from ui.pages.recipe_ideas_page import render_recipe_ideas_page
+from ui.pages.cocktail_planner_page import render_cocktail_planner_page
+
 
 from ui.components import openai_api_key_input
 
@@ -15,7 +17,7 @@ def main():
     st.sidebar.title("Meal Planner")
     page = st.sidebar.selectbox(
         "Page",
-        ["Plan", "Takeout", "Recipe Ideas"]
+        ["Plan", "Takeout", "Recipe Ideas", "Cocktails"]
     )
 
     with st.sidebar.expander("Owner Access"):
@@ -38,6 +40,9 @@ def main():
 
     elif page == "Recipe Ideas":
         render_recipe_ideas_page()
+
+    elif page == "Cocktails":
+        render_cocktail_planner_page()
 
 
 if __name__ == "__main__":

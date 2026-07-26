@@ -26,7 +26,7 @@ def openai_api_key_input():
 
     if not api_key:
         st.sidebar.warning(
-            "An OpenAI API key is required to generate a plan or takeout recommendations."
+            "An OpenAI API key is required to generate recommendations."
         )
 
     return api_key or None
