@@ -9,29 +9,6 @@ COCKTAIL_SHEET_NAMES = {
     "cocktail_recipes": "Cocktail Recipes",          # recipe/ingredient junction (was "Cocktail Ingredients")
 }
 
-DEFAULT_ON_HAND = {
-    # Sensible pre-selected defaults for non-owner visitors —
-    # a "reasonably well-stocked home bar" starting point.
-    "Rye Whiskey": "Yes",
-    "Bourbon": "Yes",
-    "Gin": "Yes",
-    "Vodka": "Yes",
-    "Sweet Vermouth": "Yes",
-    "Dry Vermouth": "Yes",
-    "Campari": "No",
-    "Aperol": "No",
-    "Amaro Nonino": "No",
-    "Amaro Montenegro": "No",
-    "Averna": "No",
-    "Coffee Liqueur": "No",
-    "Angostura Bitters": "Yes",
-    "Lemon Juice": "Yes",
-    "Simple Syrup": "Yes",
-    "Espresso": "No",
-    "Luxardo Cherry": "No",
-}
-
-
 @st.cache_data
 def read_cocktail_sheet(sheet_name: str) -> pd.DataFrame:
     """Reads a single named worksheet into a DataFrame.
@@ -50,16 +27,15 @@ def load_cocktails() -> pd.DataFrame:
 
 
 def load_cocktail_ingredients(is_owner: bool) -> pd.DataFrame:
-    """Ingredient master list (formerly "Bar Inventory"), now also carrying
-    On-Hand directly as a column (formerly the separate Bar Inventory Status
-    sheet). Owner mode: On-Hand reflects the real persisted sheet values.
-    Non-owner: On-Hand is overridden with sensible static defaults, since
-    non-owner visitors have no persisted inventory of their own.
+    """Ingredient master list. Owner mode: On-Hand reflects the real
+    persisted sheet values. Non-owner: On-Hand is overridden with the
+    sheet's own Guest Default On-Hand column, since non-owner visitors
+    have no persisted inventory of their own.
     """
     df = read_cocktail_sheet(COCKTAIL_SHEET_NAMES["cocktail_ingredients"])
     if not is_owner:
         df = df.copy()
-        df["On-Hand"] = df["Ingredient Name"].map(DEFAULT_ON_HAND).fillna("No")
+        df["On-Hand"] = df["Guest Default On-Hand"]
     return df
 
 

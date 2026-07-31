@@ -1,6 +1,305 @@
+import random
 import streamlit as st
+import pandas as pd
 from services.cocktail_sheets_loader import load_cocktail_workbook
 from services.cocktail_llm_client import generate_cocktail_plan
+
+
+CATEGORY_GROUPS = {
+    "Spirits & Wines": {
+        "Spirits": {"column": "Family", "values": ["Whiskey", "Rum", "Gin", "Vodka", "Tequila & Mezcal", "Brandy", "Other"]},
+        "Wines": {"column": "Category", "values": ["Fortified Wine", "Aperitif Wine", "Sparkling Wine", "Wine"]},
+    },
+    "Liqueurs, Amari & Bitters": {
+        "Liqueur": {"column": "Category", "values": ["Liqueur"]},
+        "Amaro": {"column": "Category", "values": ["Amaro"]},
+        "Aperitivo": {"column": "Category", "values": ["Aperitivo"]},
+        "Bitters": {"column": "Category", "values": ["Bitters"]},
+    },
+    "Mixers": {
+        "Soft Drinks": {"column": "Category", "values": ["Mixer"]},
+        "Juice": {"column": "Category", "values": ["Juice"]},
+        "Dairy": {"column": "Category", "values": ["Dairy"]},
+        "Coffee": {"column": "Category", "values": ["Coffee"]},
+    },
+    "Pantry": {
+        # Bar Garnish lands here now -- jarred/shelf-stable goods, same
+        # aisle logic as Condiment/Preserve, not a produce item.
+        "Pantry": {"column": "Category", "values": ["Condiment", "Sweetener", "Syrup", "Puree", "Preserve", "Bar Garnish"]},
+    },
+    "Produce": {
+        # Garnish is gone from here -- what's left is genuinely fresh.
+        "Produce": {"column": "Category", "values": ["Fruit", "Herb"]},
+    },
+}
+
+def _render_ingredient_toggles(df, column, value, is_owner, selected_inventory):
+    """Renders alphabetized on-hand toggles for one Category/Family value.
+    When the "Show common ingredients only" checkbox is on, niche
+    (Common != Yes) items are hidden from view -- but if one is already
+    toggled on (or on-hand for the owner), it still counts toward
+    selected_inventory so the filter never silently drops something the
+    user already told the app they have."""
+    show_common_only = st.session_state.get("show_common_only", True)
+    items = df[df[column] == value].sort_values("Ingredient Name")
+
+    for _, row in items.iterrows():
+        item_name = row["Ingredient Name"]
+        key = f"inv_{is_owner}_{column}_{value}_{item_name}"
+        is_common = row["Common"] == "Yes"
+
+        if show_common_only and not is_common:
+            already_on = st.session_state.get(key, row["On-Hand"] == "Yes")
+            if already_on:
+                selected_inventory.append(item_name)
+            continue
+
+        checked = st.toggle(
+            item_name,
+            value=(row["On-Hand"] == "Yes"),
+            key=key,
+        )
+        if checked:
+            selected_inventory.append(item_name)
+
+
+def _render_tab_content(df, column, values, is_owner, selected_inventory):
+    """Renders one tab's contents. A tab backed by multiple values (e.g.
+    Wines' 4 Category values, or Spirits' 7 Family values) shows each as
+    its own sub-header; a tab backed by a single value renders flat."""
+    present = [v for v in values if not df[df[column] == v].empty]
+    if len(present) <= 1:
+        if present:
+            _render_ingredient_toggles(df, column, present[0], is_owner, selected_inventory)
+        return
+    for value in present:
+        st.markdown(f"**{value}**")
+        _render_ingredient_toggles(df, column, value, is_owner, selected_inventory)
+
+
+def _render_category_group(df, tab_map, is_owner, selected_inventory):
+    """Renders one parent group's contents inside whatever container is
+    currently open (an expander). Uses one Streamlit tab per entry in
+    tab_map, skipping any tab with no present data, and collapses to a
+    flat layout (no tabs) if only one tab ends up with data."""
+    present_tabs = {
+        label: spec for label, spec in tab_map.items()
+        if any(not df[df[spec["column"]] == v].empty for v in spec["values"])
+    }
+    if not present_tabs:
+        return
+    if len(present_tabs) == 1:
+        spec = next(iter(present_tabs.values()))
+        _render_tab_content(df, spec["column"], spec["values"], is_owner, selected_inventory)
+        return
+    tabs = st.tabs(list(present_tabs.keys()))
+    for tab, spec in zip(tabs, present_tabs.values()):
+        with tab:
+            _render_tab_content(df, spec["column"], spec["values"], is_owner, selected_inventory)
+
+def _get_cocktail_metadata(cocktail_id, cocktails_df, cocktail_recipes_df):
+    """Looks up display metadata for a Tried/Untried cocktail from the
+    sheet data. Returns None for New cocktails (cocktail_id is null) or
+    if the id doesn't match anything in the sheet -- callers should
+    treat a None return as "no sheet-backed stats to show"."""
+    if not cocktail_id:
+        return None
+
+    match = cocktails_df[cocktails_df["Cocktail ID"] == cocktail_id]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+
+    recipe_lines = cocktail_recipes_df[cocktail_recipes_df["Cocktail ID"] == cocktail_id]
+    cost_per_serving = pd.to_numeric(recipe_lines["Cost"], errors="coerce").sum()
+    standard_drinks = pd.to_numeric(recipe_lines["Standard Drinks"], errors="coerce").sum()
+
+    return {
+        "tried": row["Tried"],
+        "rating": row["Rating"],
+        "glassware": row["Glassware"],
+        "prep_method": row["Prep Method"],
+        "cost_per_serving": cost_per_serving,
+        "standard_drinks": standard_drinks,
+    }
+
+
+def _rating_value(cocktail):
+    """Best-effort numeric Rating, defaulting to 0 for blank/non-numeric
+    values so sorting never blows up on cocktails that haven't been
+    rated yet."""
+    try:
+        return float(cocktail["Rating"])
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _try_algorithmic_bypass(params, cocktails_df, cocktail_recipes_df):
+    """
+    Skips the LLM entirely for the one case where it adds nothing: an
+    existing recipe (Tried or Untried) under Mode A ("only show me
+    recipes where I have exactly everything"). That's a pure filter --
+    every ingredient line either is or isn't in selected_inventory, no
+    substitution reasoning or invention required -- so it's computed
+    directly from the sheet instead of paying for an API call.
+
+    Returns None if this request doesn't qualify (New recipes, or any
+    missing-ingredient mode other than Mode A) -- the caller should fall
+    through to the LLM in that case. Returns a list (possibly empty, if
+    nothing matches) in every other case, matching generate_cocktail_plan's
+    output schema exactly so the results UI doesn't need to know which
+    path produced them.
+    """
+    if params["recipe_source"] == "New recipes":
+        return None
+    if params["missing_ingredient_handling"] != "Only show me recipes where I have exactly everything":
+        return None
+
+    on_hand = set(params["selected_inventory"])
+    want_tried = params["recipe_source"] == "Tried recipes"
+
+    candidates = cocktails_df[
+        cocktails_df["Tried"] == "Yes" if want_tried else cocktails_df["Tried"] != "Yes"
+    ]
+
+    matches = []
+    for _, cocktail in candidates.iterrows():
+        recipe_lines = cocktail_recipes_df[
+            cocktail_recipes_df["Cocktail ID"] == cocktail["Cocktail ID"]
+        ]
+        if recipe_lines.empty:
+            continue
+        needed = set(recipe_lines["Ingredient Name"])
+        if not needed.issubset(on_hand):
+            continue
+        matches.append((cocktail, recipe_lines))
+
+    if not matches:
+        return []
+
+    # Favor higher-rated drinks in Tried mode without making it fully
+    # deterministic: sort into a pool by rating, then shuffle within it,
+    # so re-clicking Get Recommendations still surfaces some variety
+    # instead of the exact same top N every time.
+    if want_tried:
+        matches.sort(key=lambda pair: _rating_value(pair[0]), reverse=True)
+        pool = matches[: max(params["num_drinks"] * 2, len(matches))]
+    else:
+        pool = list(matches)
+
+    random.shuffle(pool)
+    chosen = pool[: params["num_drinks"]]
+
+    cocktails_out = []
+    for cocktail, recipe_lines in chosen:
+        ingredients = [
+            {
+                "item": line["Ingredient Name"],
+                "amount": f"{line['Amount']} {line['Drink Unit']}".strip(),
+                "on_hand": True,
+            }
+            for _, line in recipe_lines.iterrows()
+        ]
+
+        if want_tried:
+            rating = cocktail["Rating"]
+            rating_str = f", rated {rating}/5" if pd.notna(rating) and rating != "" else ""
+            why = f"One of your tried favorites{rating_str} — you already have everything it calls for."
+        else:
+            why = "Already in your recipe list, and you have everything on hand to make it."
+
+        batch_note = cocktail["Batch Note"] if cocktail["Batch Note"] else (
+            "Scales easily for a group." if cocktail["Batch Friendly"] == "Yes"
+            else "Best made to order, one at a time."
+        )
+
+        cocktails_out.append({
+            "name": cocktail["Cocktail Name"],
+            "source": "tried" if want_tried else "untried",
+            "cocktail_id": cocktail["Cocktail ID"],
+            "why": why,
+            "ingredients": ingredients,
+            "effort": cocktail["Effort"] if cocktail["Effort"] else "Moderate",
+            "batch_note": batch_note,
+        })
+
+    return cocktails_out
+
+
+def _render_my_bar_tab(cocktails_df, cocktail_recipes_df):
+    """Browsable view over the full Cocktails sheet -- every recipe in
+    the database, tried or not, independent of on-hand inventory or any
+    generated plan. Search/filter/sort only; no LLM involved."""
+    st.caption("Everything in your cocktail database, searchable and browsable.")
+
+    search = st.text_input("Search by name", placeholder="e.g. Manhattan")
+
+    filter_cols = st.columns(3)
+    with filter_cols[0]:
+        tried_filter = st.selectbox("Status", ["All", "Tried only", "Untried only"])
+    with filter_cols[1]:
+        categories = sorted(c for c in cocktails_df["Category"].unique() if c)
+        category_filter = st.multiselect("Category", categories)
+    with filter_cols[2]:
+        sort_by = st.selectbox("Sort by", ["Name", "Rating (high to low)"])
+
+    df = cocktails_df.copy()
+    if search:
+        df = df[df["Cocktail Name"].str.contains(search, case=False, na=False)]
+    if tried_filter == "Tried only":
+        df = df[df["Tried"] == "Yes"]
+    elif tried_filter == "Untried only":
+        df = df[df["Tried"] != "Yes"]
+    if category_filter:
+        df = df[df["Category"].isin(category_filter)]
+
+    if sort_by == "Rating (high to low)":
+        df = df.assign(_r=pd.to_numeric(df["Rating"], errors="coerce")).sort_values(
+            "_r", ascending=False, na_position="last"
+        )
+    else:
+        df = df.sort_values("Cocktail Name")
+
+    st.caption(f"{len(df)} cocktail{'s' if len(df) != 1 else ''}")
+    if df.empty:
+        st.info("No cocktails match those filters.")
+        return
+
+    NUM_COLUMNS = 3
+    columns = st.columns(NUM_COLUMNS)
+    for i, (_, cocktail) in enumerate(df.iterrows()):
+        with columns[i % NUM_COLUMNS]:
+            with st.container(border=True):
+                st.markdown(f"**{cocktail['Cocktail Name']}**")
+                badge_parts = [p for p in [cocktail["Category"], cocktail["Base Spirit"]] if p]
+                if badge_parts:
+                    st.caption(" · ".join(str(p) for p in badge_parts))
+
+                if cocktail["Tried"] == "Yes":
+                    rating = cocktail["Rating"]
+                    rating_str = f" ({rating}/5)" if pd.notna(rating) and rating != "" else ""
+                    st.write(f"⭐ Tried{rating_str}")
+                else:
+                    st.write("🆕 Untried")
+
+                if cocktail["Notes"]:
+                    st.caption(cocktail["Notes"])
+
+                with st.expander("Recipe"):
+                    if cocktail["Glassware"]:
+                        st.caption(f"Glass: {cocktail['Glassware']}")
+                    if cocktail["Prep Method"]:
+                        st.caption(f"Prep: {cocktail['Prep Method']}")
+                    recipe_lines = cocktail_recipes_df[
+                        cocktail_recipes_df["Cocktail ID"] == cocktail["Cocktail ID"]
+                    ]
+                    for _, line in recipe_lines.iterrows():
+                        st.write(f"- {line['Amount']} {line['Drink Unit']} {line['Ingredient Name']}")
+                    if cocktail["Effort"]:
+                        st.caption(f"Effort: {cocktail['Effort']}")
+                    if cocktail["Batch Note"]:
+                        st.caption(f"Batching: {cocktail['Batch Note']}")
+
 
 def render_cocktail_planner_page():
     st.title("Cocktail Planner")
@@ -10,12 +309,28 @@ def render_cocktail_planner_page():
     workbook = load_cocktail_workbook(is_owner)
     cocktail_ingredients_df = workbook["cocktail_ingredients"]
 
+    if is_owner:
+        st.info("🔓 Owner mode — inventory below reflects your real, persisted bar stock.")
+    else:
+        st.info("👋 Guest mode — inventory below starts from common defaults; toggle it to match what you actually have on hand.")
+
+    plan_tab, my_bar_tab = st.tabs(["Plan a Drink", "My Bar"])
+
+    with plan_tab:
+        _render_plan_tab(workbook, cocktail_ingredients_df, is_owner)
+
+    with my_bar_tab:
+        _render_my_bar_tab(workbook["cocktails"], workbook["cocktail_recipes"])
+
+
+def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
+
     with st.sidebar:
         st.header("Cocktail Plan Settings")
 
         recipe_source = st.radio(
-            "Existing recipes or something new?",
-            options=["Existing recipes", "New recipes"]
+            "Tried, untried, or something new?",
+            options=["Tried recipes", "Untried recipes", "New recipes"]
         )
 
         st.caption("How to handle missing ingredients?")
@@ -33,6 +348,13 @@ def render_cocktail_planner_page():
             "How many people?",
             options=["1", "2-4", "5+"],
             horizontal=True,
+        )
+
+        num_drinks = st.number_input(
+            "How many drinks to suggest?",
+            min_value=1,
+            max_value=20,
+            value=3,
         )
 
         st.subheader("Vibe")
@@ -57,24 +379,42 @@ def render_cocktail_planner_page():
     # toggles to be usable squeezed into a narrow column.
     st.subheader("Current Inventory")
     st.caption("What do you have and want to drink right now?")
+    st.checkbox(
+        "Show common ingredients only",
+        value=True,
+        key="show_common_only",
+        help="Uncheck to reveal specialty/niche ingredients within each section.",
+    )
 
     selected_inventory = []
-    categories = cocktail_ingredients_df["Category"].unique()
-    NUM_COLUMNS = 5
+    NUM_COLUMNS = 3
     columns = st.columns(NUM_COLUMNS)
-    for i, category in enumerate(categories):
+    for i, (group_name, tab_map) in enumerate(CATEGORY_GROUPS.items()):
         with columns[i % NUM_COLUMNS]:
-            with st.expander(category):
-                category_items = cocktail_ingredients_df[cocktail_ingredients_df["Category"] == category]
-                for _, row in category_items.iterrows():
-                    item_name = row["Ingredient Name"]
-                    checked = st.toggle(
-                        item_name,
-                        value=(row["On-Hand"] == "Yes"),
-                        key=f"inv_{category}_{item_name}",
-                    )
-                    if checked:
-                        selected_inventory.append(item_name)
+            with st.expander(group_name):
+                _render_category_group(
+                    cocktail_ingredients_df, tab_map, is_owner, selected_inventory
+                )
+
+    # Safety net: any sheet category not yet mapped into a parent group
+    # still needs to show up somewhere rather than silently vanishing.
+    mapped_categories = set()
+    for tab_map in CATEGORY_GROUPS.values():
+        for spec in tab_map.values():
+            if spec["column"] == "Category":
+                mapped_categories.update(spec["values"])
+            elif spec["column"] == "Family":
+                # Family is only ever populated for Spirit rows, so a
+                # Family-keyed tab implicitly covers Category == "Spirit".
+                mapped_categories.add("Spirit")
+    unmapped_categories = sorted(
+        set(cocktail_ingredients_df["Category"].unique()) - mapped_categories
+    )
+    if unmapped_categories:
+        with st.expander("Other"):
+            _render_tab_content(
+                cocktail_ingredients_df, "Category", unmapped_categories, is_owner, selected_inventory
+            )
 
     st.divider()
 
@@ -95,48 +435,98 @@ def render_cocktail_planner_page():
             "recipe_source": recipe_source,
             "missing_ingredient_handling": missing_ingredient_handling,
             "party_size": party_size,
+            "num_drinks": num_drinks,
             "drink_style": drink_style,
             "occasion": occasion,
             "selected_inventory": selected_inventory,
             "situational_context": situational_context,
         }
 
-        workbook_json = {
-            "cocktails": workbook["cocktails"].to_dict(orient="records"),
-            "cocktail_ingredients": workbook["cocktail_ingredients"].to_dict(orient="records"),
-            "cocktail_recipes": workbook["cocktail_recipes"].to_dict(orient="records"),
-        }
+        # Mode A + an existing recipe is a pure lookup -- no reasoning or
+        # invention needed -- so skip the LLM call entirely when it applies.
+        bypass_result = _try_algorithmic_bypass(
+            params, workbook["cocktails"], workbook["cocktail_recipes"]
+        )
 
-        cache_bust = st.session_state.get("cocktail_cache_bust", 0)
-        st.session_state["cocktail_cache_bust"] = cache_bust + 1
+        if bypass_result is not None:
+            cocktails = bypass_result
+        else:
+            cocktail_ingredients_records = workbook["cocktail_ingredients"].drop(
+                columns=["On-Hand"]
+            ).to_dict(orient="records")
 
-        try:
-            cocktails = generate_cocktail_plan(
-                params, workbook_json, api_key, cache_bust=cache_bust
-            )
-        except ValueError as e:
-            st.error(str(e))
-            cocktails = None
+            workbook_json = {
+                "cocktails": workbook["cocktails"].to_dict(orient="records"),
+                "cocktail_ingredients": cocktail_ingredients_records,
+                "cocktail_recipes": workbook["cocktail_recipes"].to_dict(orient="records"),
+            }
+
+            cache_bust = st.session_state.get("cocktail_cache_bust", 0)
+            st.session_state["cocktail_cache_bust"] = cache_bust + 1
+
+            try:
+                cocktails = generate_cocktail_plan(
+                    params, workbook_json, api_key, cache_bust=cache_bust
+                )
+            except ValueError as e:
+                st.error(str(e))
+                cocktails = None
 
         response = {"cocktails": cocktails} if cocktails is not None else None
 
-        if response:
+        if response and not response["cocktails"]:
+            st.warning(
+                "Nothing matches exactly what you have on hand right now. "
+                "Try allowing substitutions, or add more to your inventory above."
+            )
+        elif response:
             st.subheader("Recommendations")
-            for cocktail in response["cocktails"]:
-                with st.container(border=True):
-                    st.markdown(f"### {cocktail['name']}")
-                    st.caption(f"{cocktail['source'].capitalize()} recipe · Effort: {cocktail['effort']}")
-                    st.write(cocktail["why"])
+            RESULT_COLUMNS = 2
+            result_columns = st.columns(RESULT_COLUMNS)
+            for i, cocktail in enumerate(response["cocktails"]):
+                with result_columns[i % RESULT_COLUMNS]:
+                    with st.container(border=True):
+                        st.markdown(f"### {cocktail['name']}")
+                        st.caption(f"{cocktail['source'].capitalize()} recipe · Effort: {cocktail['effort']}")
+                        st.write(cocktail["why"])
 
-                    st.markdown("**Ingredients**")
-                    for ing in cocktail["ingredients"]:
-                        marker = "✅" if ing["on_hand"] else "🛒"
-                        line = f"{marker} {ing['amount']} {ing['item']}"
-                        if ing.get("note"):
-                            line += f"  \n*{ing['note']}*"
-                        st.write(line)
+                        # Tried/Untried only -- New cocktails have no
+                        # cocktail_id and therefore no sheet-backed stats.
+                        metadata = _get_cocktail_metadata(
+                            cocktail.get("cocktail_id"),
+                            workbook["cocktails"],
+                            workbook["cocktail_recipes"],
+                        )
 
-                    st.caption(f"Batch note: {cocktail['batch_note']}")
+                        if metadata:
+                            badge_parts = []
+                            if metadata["tried"] == "Yes":
+                                rating = metadata["rating"]
+                                rating_str = f" ({rating}/5)" if pd.notna(rating) and rating != "" else ""
+                                badge_parts.append(f"⭐ Tried{rating_str}")
+                            else:
+                                badge_parts.append("🆕 Untried")
+                            if metadata["glassware"]:
+                                badge_parts.append(str(metadata["glassware"]))
+                            if metadata["prep_method"]:
+                                badge_parts.append(str(metadata["prep_method"]))
+                            st.caption(" · ".join(badge_parts))
+
+                            stat_cols = st.columns(2)
+                            if pd.notna(metadata["standard_drinks"]) and metadata["standard_drinks"] > 0:
+                                stat_cols[0].metric("Standard Drinks", f"{metadata['standard_drinks']:.1f}")
+                            if pd.notna(metadata["cost_per_serving"]) and metadata["cost_per_serving"] > 0:
+                                stat_cols[1].metric("Cost/Serving", f"${metadata['cost_per_serving']:.2f}")
+
+                        st.markdown("**Ingredients**")
+                        for ing in cocktail["ingredients"]:
+                            marker = "✅" if ing["on_hand"] else "🛒"
+                            line = f"{marker} {ing['amount']} {ing['item']}"
+                            if ing.get("note"):
+                                line += f"  \n*{ing['note']}*"
+                            st.write(line)
+
+                        st.caption(f"Batch note: {cocktail['batch_note']}")
 
     else:
         st.info("Choose your inventory above, set preferences in the sidebar, and click **Get Recommendations**.")
