@@ -226,11 +226,13 @@ def _try_algorithmic_bypass(params, cocktails_df, cocktail_recipes_df):
     return cocktails_out
 
 
-def _render_my_bar_tab(cocktails_df, cocktail_recipes_df):
+def _render_my_bar_tab(cocktails_df, cocktail_recipes_df, is_owner):
     """Browsable view over the full Cocktails sheet -- every recipe in
     the database, tried or not, independent of on-hand inventory or any
     generated plan. Search/filter/sort only; no LLM involved."""
     st.caption("Everything in your cocktail database, searchable and browsable.")
+    if not is_owner:
+        st.caption("Tried status and ratings reflect the host's history, not yours.")
 
     search = st.text_input("Search by name", placeholder="e.g. Manhattan")
 
@@ -282,7 +284,7 @@ def _render_my_bar_tab(cocktails_df, cocktail_recipes_df):
                 else:
                     st.write("🆕 Untried")
 
-                if cocktail["Notes"]:
+                if cocktail["Notes"] and is_owner:
                     st.caption(cocktail["Notes"])
 
                 with st.expander("Recipe"):
@@ -314,13 +316,14 @@ def render_cocktail_planner_page():
     else:
         st.info("👋 Guest mode — inventory below starts from common defaults; toggle it to match what you actually have on hand.")
 
-    plan_tab, my_bar_tab = st.tabs(["Plan a Drink", "My Bar"])
+    my_bar_label = "My Bar" if is_owner else "Host's Bar"
+    plan_tab, my_bar_tab = st.tabs(["Plan a Drink", my_bar_label])
 
     with plan_tab:
         _render_plan_tab(workbook, cocktail_ingredients_df, is_owner)
 
     with my_bar_tab:
-        _render_my_bar_tab(workbook["cocktails"], workbook["cocktail_recipes"])
+        _render_my_bar_tab(workbook["cocktails"], workbook["cocktail_recipes"], is_owner)
 
 
 def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
@@ -332,6 +335,8 @@ def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
             "Tried, untried, or something new?",
             options=["Tried recipes", "Untried recipes", "New recipes"]
         )
+        if not is_owner:
+            st.caption("Tried status and ratings reflect the host's history, not yours.")
 
         st.caption("How to handle missing ingredients?")
         missing_ingredient_handling = st.radio(
@@ -343,6 +348,16 @@ def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
             ],
             label_visibility="collapsed",
         )
+
+        is_instant = (
+            recipe_source != "New recipes"
+            and missing_ingredient_handling == "Only show me recipes where I have exactly everything"
+        )
+        if is_instant:
+            st.caption("⚡ Instant — pulled straight from your recipe list, no AI needed.")
+        else:
+            st.caption("🤖 Uses AI — requires your OpenAI API key.")
+
 
         party_size = st.radio(
             "How many people?",
