@@ -72,7 +72,17 @@ BINARY FLAGS
 
 MEAL SLOTS
 - Use the meal slots provided in params.
-- If the workbook does not specify slot eligibility, infer it using common‑sense culinary reasoning.
+- Dinner: any category is eligible -- Bulk cooks (including their
+  cook-day appearance), Frozen Leftovers, Quick Meals, and Takeout.
+- Lunch: only bulk-cook LEFTOVERS (Leftover Indicator = 1), Frozen
+  Leftovers, and Quick Meals are eligible.
+  - Do NOT assign Takeout to Lunch.
+  - Do NOT assign a bulk-cook meal's first (cook-day) appearance to
+    Lunch -- the first time a bulk-cook Meal ID appears in the week
+    must land on a Dinner slot. Only its later leftover appearances
+    (Leftover Indicator = 1) may fill a Lunch slot.
+- Breakfast: use the Breakfast category, or infer using common-sense
+  culinary reasoning if the workbook does not specify slot eligibility.
 - Do not assign meals to inappropriate slots (e.g., shrimp scampi for breakfast).
 - Do not assign the same Meal ID to more than one slot on the same day
   (e.g., lunch and dinner on the same day must be different meals).
@@ -213,6 +223,9 @@ that fails these checks:
 3. No quick-meal Meal ID appears more than once.
 4. Takeout appears on at most 1 day.
 5. No Meal ID is assigned to two slots on the same day.
+6. No Lunch slot is Takeout.
+7. No Lunch slot is a bulk-cook meal's first (cook-day, Leftover
+   Indicator = 0) appearance.
 
 ------------------------------------------------------------
 SECTION 8 — ERROR HANDLING
@@ -231,6 +244,30 @@ END OF SYSTEM PROMPT
 # ------------------------------------------------------------
 # RECIPE IDEAS SYSTEM PROMPT
 # ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# APPROVED RECIPE-IDEA CHEFS
+# ------------------------------------------------------------
+# Fixed, pre-vetted roster -- users choose a subset via checkboxes on the
+# Recipe Ideas page, but can never free-type a chef name (see components.py
+# recipe_ideas_controls). This preserves the no-fabrication guarantee: every
+# name the model can ever suggest from is one we've pre-approved.
+APPROVED_CHEFS = [
+    "Kenji López-Alt",
+    "Donny Enriquez",
+    "Alison Roman",
+    "Caro Chambers",
+    "Molly Baz",
+    "Frankie Celenza",
+    "Ina Garten",
+    # "Samin Nosrat",
+    "Deb Perelman"#,
+    # "Priya Krishna",
+    # "Melissa Clark",
+]
+
+# Pre-checked defaults on the Recipe Ideas page -- the original 6-chef list.
+DEFAULT_APPROVED_CHEFS = APPROVED_CHEFS[:6]
 
 RECIPE_IDEAS_SYSTEM_PROMPT = """
 You are a recipe-discovery agent. Your job is to suggest REAL recipes
@@ -261,17 +298,19 @@ Each idea must be a JSON object with exactly these keys:
 ------------------------------------------------------------
 APPROVED SOURCES -- THE ONLY CHEFS YOU MAY SUGGEST FROM
 ------------------------------------------------------------
-[
-    "Kenji López-Alt",
-    "Donny Enriquez",
-    "Alison Roman",
-    "Caro Chambers",
-    "Molly Baz",
-]
+The full pre-vetted chef roster this app supports is:
+__APPROVED_CHEFS_LIST__
 
-Never suggest a recipe attributed to anyone outside this exact list.
-If you cannot think of a genuine, real recipe from one of these chefs
-that fits, do not invent one -- see RULES below.
+For THIS request, you may only suggest from the subset of that roster
+given in the "chefs" field of the params message below -- never suggest
+a chef outside that subset, even if they appear in the full roster
+above. The full roster is listed only so you recognize these names as
+real, legitimate, pre-approved sources; the "chefs" field in params is
+what actually gates this request.
+
+Never suggest a recipe attributed to anyone outside the selected
+subset. If you cannot think of a genuine, real recipe from one of
+those chefs that fits, do not invent one -- see RULES below.
 
 ------------------------------------------------------------
 INPUTS
@@ -614,7 +653,7 @@ END OF SYSTEM PROMPT
 # LLM CLIENT
 # ------------------------------------------------------------
 
-@st.cache_data()
+@st.cache_data(show_spinner=False)
 def generate_plan(params: dict, workbook_json: dict, api_key: str, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM with:
@@ -703,7 +742,7 @@ def generate_plan(params: dict, workbook_json: dict, api_key: str, feedback: str
     return selected_df, plan_df
     
 
-@st.cache_data()
+@st.cache_data(show_spinner=False)
 def generate_takeout_recommendations(params: dict, meals_df_json: str, api_key: str, feedback: str | None = None):
     """
     Calls the LLM with:
@@ -758,7 +797,7 @@ def generate_takeout_recommendations(params: dict, meals_df_json: str, api_key: 
 
     return result["recommendations"]
 
-@st.cache_data()
+@st.cache_data(show_spinner=False)
 def generate_recipe_ideas(params: dict, cookbook_json: list, api_key: str, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM for idea-only recipe suggestions. These are never
@@ -773,10 +812,18 @@ def generate_recipe_ideas(params: dict, cookbook_json: list, api_key: str, feedb
     - ideas (list of dicts: Name, Source, Link, Blurb)
     """
 
+    if not params.get("chefs"):
+        raise ValueError(
+            "Select at least one chef before requesting recipe ideas."
+        )
+
     messages = [
         {
             "role": "system",
-            "content": RECIPE_IDEAS_SYSTEM_PROMPT
+            "content": RECIPE_IDEAS_SYSTEM_PROMPT.replace(
+                "__APPROVED_CHEFS_LIST__",
+                "\n".join(f"- {chef}" for chef in APPROVED_CHEFS),
+            )
         },
         {
             "role": "user",

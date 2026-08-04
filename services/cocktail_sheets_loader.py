@@ -9,11 +9,15 @@ COCKTAIL_SHEET_NAMES = {
     "cocktail_recipes": "Cocktail Recipes",          # recipe/ingredient junction (was "Cocktail Ingredients")
 }
 
-@st.cache_data
+
 def read_cocktail_sheet(sheet_name: str) -> pd.DataFrame:
     """Reads a single named worksheet into a DataFrame.
     Mirrors google_sheets_loader.py's read_sheet pattern, but kept
     separate so cocktail-sheet changes can't affect meal-planner caching.
+    Uncached, like _read_sheet() in google_sheets_loader.py -- caching
+    lives only at the boundary functions below (load_cocktails,
+    load_cocktail_recipes), so there's a single cache entry per sheet
+    instead of two independent ones that can drift out of sync.
     """
     client = _get_client()
     ws = client.open("Meal Plan for Web App").worksheet(sheet_name)
@@ -21,7 +25,7 @@ def read_cocktail_sheet(sheet_name: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-@st.cache_data
+@st.cache_data(ttl=300, show_spinner=False)
 def load_cocktails() -> pd.DataFrame:
     return read_cocktail_sheet(COCKTAIL_SHEET_NAMES["cocktails"])
 
@@ -39,7 +43,7 @@ def load_cocktail_ingredients(is_owner: bool) -> pd.DataFrame:
     return df
 
 
-@st.cache_data
+@st.cache_data(ttl=300, show_spinner=False)
 def load_cocktail_recipes() -> pd.DataFrame:
     return read_cocktail_sheet(COCKTAIL_SHEET_NAMES["cocktail_recipes"])
 

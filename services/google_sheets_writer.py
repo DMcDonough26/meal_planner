@@ -1,6 +1,7 @@
 import pandas as pd
 import gspread
 import streamlit as st
+import re
 from google.oauth2.service_account import Credentials
 from config.constants import SHEET_NAME
 
@@ -100,19 +101,14 @@ def write_plan_to_google_sheets(
     # ---------------------------------------------------------
     # Build Weekly Grocery List export (new schema)
     # ---------------------------------------------------------
-    # Expected grocery_df columns:
-    # Section, Ingredient Name, Quantity, Unit (optional), Recipe IDs (optional)
     grocery_export = pd.DataFrame({
         "Plan Date": plan_date,
         "Store": grocery_df["Store"],
         "Section": grocery_df["Section"],
-        "Order Number": grocery_df.get("Order Number", ""),   # new
-        "Ingredient ID": grocery_df.get("Ingredient ID", ""),
-        "Ingredient Name": grocery_df["Ingredient Name"],
         "Scaled Display Quantity": grocery_df["Scaled Display Quantity"],
         "Display Unit": grocery_df["Display Unit"],
+        "Ingredient Name": grocery_df["Ingredient Name"],
         "Meal Names": grocery_df.get("Meal Names", ""),
-        "Notes": "",
     })
 
 
@@ -121,3 +117,48 @@ def write_plan_to_google_sheets(
     # ---------------------------------------------------------
     grocery_sheet = _get_sheet("Weekly Grocery List")
     _overwrite_sheet(grocery_sheet, grocery_export)
+
+# ---------------------------------------------------------
+# Recipe Ideas -> Cookbook write-back
+# ---------------------------------------------------------
+
+def _generate_next_meal_id(meals_df: pd.DataFrame) -> str:
+    """Generate the next Meal ID by incrementing the highest numeric suffix
+    found among existing IDs, reusing that ID's non-numeric prefix (e.g.
+    "M014" -> "M015"). Falls back to a plain sequential number if no
+    existing IDs parse."""
+    existing_ids = meals_df["Meal ID"].dropna().astype(str)
+    best_prefix, best_num, best_width = "", 0, 0
+    for mid in existing_ids:
+        match = re.match(r"^(\D*)(\d+)$", mid.strip())
+        if match:
+            prefix, num_str = match.groups()
+            num = int(num_str)
+            if num > best_num:
+                best_num, best_prefix, best_width = num, prefix, len(num_str)
+    if best_width:
+        return f"{best_prefix}{str(best_num + 1).zfill(best_width)}"
+    return str(len(existing_ids) + 1)
+
+def write_recipe_idea_to_cookbook(idea: dict, category: str, meals_df: pd.DataFrame) -> str:
+    """
+    Append a Recipe Ideas card to the Meals sheet as a new cookbook entry.
+    Only Meal Name/ID/Category/Source/References/Notes are populated --
+    ranking-attribute fields (Cook Time, Effort, Cost, etc.) are left as
+    "TBD" since new ideas intentionally skip the ranking-attribute
+    estimation used elsewhere; the user fills those in after actually
+    cooking it. Returns the new Meal ID.
+    """
+    new_id = _generate_next_meal_id(meals_df)
+    row = {col: "TBD" for col in meals_df.columns}
+    row["Meal Name"] = idea.get("Name", "")
+    row["Meal ID"] = new_id
+    row["Category"] = category
+    row["Source"] = idea.get("Source", "")
+    row["References"] = idea.get("Link", "")
+    row["Notes"] = idea.get("Blurb", "")
+    row_df = pd.DataFrame([row], columns=meals_df.columns)
+
+    sheet = _get_sheet("Meals")
+    _append_rows(sheet, row_df)
+    return new_id

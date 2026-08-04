@@ -41,7 +41,7 @@ def _safe_numeric(series):
         .astype(float)
     )
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def load_workbook():
     client = _get_client()
     workbook = client.open(SHEET_NAME)

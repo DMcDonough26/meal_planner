@@ -273,7 +273,7 @@ END OF SYSTEM PROMPT
 # LLM CLIENT
 # ------------------------------------------------------------
 
-@st.cache_data()
+@st.cache_data(show_spinner=False)
 def generate_cocktail_plan(params: dict, workbook_json: dict, api_key: str, feedback: str | None = None, cache_bust: int = 0):
     """
     Calls the LLM with:
