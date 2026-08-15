@@ -496,6 +496,8 @@ def _render_browse_meals_tab(meals_df, recipes_df):
                 "Taste (high to low)",
                 "Healthy (high to low)",
                 "Effort (low to high)",
+                "Stretchiness (high to low)",
+                "Cleanup (low to high)",
             ],
         )
 
@@ -520,6 +522,10 @@ def _render_browse_meals_tab(meals_df, recipes_df):
         df = df.sort_values("Healthy", ascending=False, na_position="last")
     elif sort_by == "Effort (low to high)":
         df = df.sort_values("Effort", ascending=True, na_position="last")
+    elif sort_by == "Stretchiness (high to low)":
+        df = df.sort_values("Stretchiness", ascending=False, na_position="last")
+    elif sort_by == "Cleanup (low to high)":
+        df = df.sort_values("Cleanup", ascending=True, na_position="last")
     else:
         df = df.sort_values("Meal Name")
 
@@ -553,6 +559,8 @@ def _render_browse_meals_tab(meals_df, recipes_df):
             ("😋 Taste", _format_score(meal["Taste"])),
             ("🥗 Healthy", _format_score(meal["Healthy"])),
             ("🧊 Freezable", _format_score(meal["Freezable"])),
+            ("🍲 Stretchiness", _format_score(meal["Stretchiness"])),
+            ("🧽 Cleanup", _format_score(meal["Cleanup"])),
         ]
 
         recipe_lines = recipes_df[recipes_df["Meal Name"] == meal["Meal Name"]]
