@@ -13,6 +13,25 @@ from services.google_sheets_loader import load_workbook
 from services.llm_client import generate_takeout_recommendations
 
 
+def _format_yes_no(value):
+    """Normalizes a Drive-Thru/Delivery flag to Yes/No. Handles the
+    0/1 numeric form (from meals_df, per the takeout prompt's binary
+    flag convention) as well as bools or pre-formatted "Yes"/"No"
+    strings, in case the LLM doesn't strictly follow that convention
+    for newly-suggested (non-existing) options."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "N/A"
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if stripped in ("yes", "no"):
+            return stripped.capitalize()
+        try:
+            value = float(stripped)
+        except ValueError:
+            return value  # unrecognized string -- pass through as-is
+    return "Yes" if value else "No"
+
+
 def _render_takeout_cards(recommendations):
     """Renders a batch of takeout cards at a shared height so they line
     up regardless of how long each restaurant's name or reasoning note
@@ -37,8 +56,8 @@ def _render_takeout_cards(recommendations):
                 ("🥗 Health", rec["Healthy"]),
                 ("😋 Taste", rec["Taste"]),
                 ("💰 Cost/Serving", rec["Cost per Serving"]),
-                ("🚗 Drive-Thru", rec["Drive-Thru"]),
-                ("🚚 Delivery", rec["Delivery"]),
+                ("🚗 Drive-Thru", _format_yes_no(rec["Drive-Thru"])),
+                ("🚚 Delivery", _format_yes_no(rec["Delivery"])),
             ],
             body=rec["Reasoning"],
         )
@@ -151,7 +170,12 @@ def _render_browse_takeout_tab(meals_df):
     """Browsable view over every Takeout entry in the Meals sheet --
     independent of any generated recommendation. Search/filter/sort
     only; no LLM involved. No ingredient search here -- takeout
-    entries aren't ingredient-modeled the way home-cooked meals are."""
+    entries aren't ingredient-modeled the way home-cooked meals are.
+
+    Note: for Takeout rows, the "Cook Time" column is repurposed to
+    mean pickup/drive time rather than literal cooking time -- it's
+    displayed and labeled as "Pickup Time" here, never "Cook Time" or
+    "Distance"."""
     st.caption("Every takeout option in your database, searchable and browsable.")
 
     base_df = meals_df[meals_df["Category"] == "Takeout"]
@@ -174,6 +198,7 @@ def _render_browse_takeout_tab(meals_df):
             "Sort by",
             [
                 "Name",
+                "Pickup Time (low to high)",
                 "Cost per Serving (low to high)",
                 "Taste (high to low)",
                 "Healthy (high to low)",
@@ -190,7 +215,9 @@ def _render_browse_takeout_tab(meals_df):
     if "Drive-Thru" in feature_filter:
         df = df[df["Drive Thru"] > 0]
 
-    if sort_by == "Cost per Serving (low to high)":
+    if sort_by == "Pickup Time (low to high)":
+        df = df.sort_values("Cook Time", ascending=True, na_position="last")
+    elif sort_by == "Cost per Serving (low to high)":
         df = df.sort_values("Cost per Serving", ascending=True, na_position="last")
     elif sort_by == "Taste (high to low)":
         df = df.sort_values("Taste", ascending=False, na_position="last")
@@ -207,17 +234,21 @@ def _render_browse_takeout_tab(meals_df):
     def _format_score(value):
         return "N/A" if pd.isna(value) else f"{value:g}"
 
+    def _format_pickup_time(value):
+        return "N/A" if pd.isna(value) else f"{value:g} min"
+
     def _render_browse_takeout_card(rec, _rank):
         cost_value = rec["Cost per Serving"]
         formatted_cost = "N/A" if pd.isna(cost_value) else f"${float(cost_value):.2f}"
 
         badges = [b for b in [
             ("🌍 Cuisine", rec["Cuisine"]) if rec["Cuisine"] else None,
+            ("🕒 Pickup Time", _format_pickup_time(rec["Cook Time"])),
             ("💰 Cost/Serving", formatted_cost),
             ("🥗 Healthy", _format_score(rec["Healthy"])),
             ("😋 Taste", _format_score(rec["Taste"])),
-            ("🚗 Drive-Thru", _format_score(rec["Drive Thru"])),
-            ("🚚 Delivery", _format_score(rec["Delivery"])),
+            ("🚗 Drive-Thru", _format_yes_no(rec["Drive Thru"])),
+            ("🚚 Delivery", _format_yes_no(rec["Delivery"])),
         ] if b]
 
         render_metadata_card(rec["Meal Name"], badges=badges)
