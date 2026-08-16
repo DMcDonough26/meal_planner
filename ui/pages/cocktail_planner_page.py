@@ -226,6 +226,17 @@ def _try_algorithmic_bypass(params, cocktails_df, cocktail_recipes_df):
     return cocktails_out
 
 
+def _truncate_title(name, max_len=19):
+    # A few cocktail names (e.g. "Amaro Montenegro Manhattan") wrap to
+    # two lines and stretch just that card in the Host's Bar grid.
+    # Almost everything else here is one line, so reserving two-line
+    # height for the whole grid wastes space -- easier to just shorten
+    # the rare long ones.
+    if len(name) <= max_len:
+        return name
+    return name[: max_len - 1].rstrip() + "…"
+
+
 def _render_my_bar_tab(cocktails_df, cocktail_recipes_df, cocktail_ingredients_df, is_owner):
     """Browsable view over the full Cocktails sheet -- every recipe in
     the database, tried or not, independent of on-hand inventory or any
@@ -310,7 +321,7 @@ def _render_my_bar_tab(cocktails_df, cocktail_recipes_df, cocktail_ingredients_d
             expander_lines.append(f"Batching: {cocktail['Batch Note']}")
 
         render_metadata_card(
-            cocktail["Cocktail Name"],
+            _truncate_title(cocktail["Cocktail Name"]),
             badges=badges,
             body=status,
             footer=cocktail["Notes"] if cocktail["Notes"] and is_owner else None,
