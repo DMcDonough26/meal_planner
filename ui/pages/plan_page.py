@@ -9,6 +9,7 @@ from ui.components import (
     render_day_plan_card,
     compute_card_height,
     compute_day_card_height,
+    truncate_title,
 )
 from services.llm_client import generate_plan
 
@@ -264,19 +265,27 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
         # too, not just within themselves. Body is empty (these cards
         # have no reasoning text) -- the 9-line attribute list is what
         # drives height here, via extra_lines_fn.
+        #
+        # title_fn truncates (truncate_title(), the same single-line
+        # approach used on the Browse Meals cards) instead of the old
+        # wrap-and-pad title_lines approach -- that was leaving a lot
+        # of dead space above the badges on cards with short titles,
+        # since it reserved room for the batch's longest WRAPPED title
+        # rather than just cutting long ones down to size. A truncated
+        # title always estimates to one line, so title_lines is no
+        # longer needed on the render call below either.
         recipe_card_sizing = compute_card_height(
             card_meal_names,
-            title_fn=lambda name: name,
+            title_fn=lambda name: truncate_title(name),
             body_fn=lambda name: "",
             extra_lines_fn=lambda name: 9,
         )
 
         def _render_plan_recipe_card(recipe_name, rank):
             render_metadata_card(
-                recipe_name,
+                truncate_title(recipe_name),
                 rank=rank,
                 height=recipe_card_sizing.height,
-                title_lines=recipe_card_sizing.title_lines,
                 badges=_plan_recipe_badges(recipe_name),
             )
 
@@ -537,16 +546,6 @@ def _render_browse_meals_tab(meals_df, recipes_df):
     def _format_score(value):
         return "N/A" if pd.isna(value) else f"{value:g}"
 
-    def _truncate_title(name, max_len=20):
-        # A couple of meal names (e.g. "Salad Kit and Rotisserie
-        # Chicken") wrap to two lines and stretch just that card.
-        # Almost everything else here is one line, so reserving
-        # two-line height for the whole grid wastes space -- easier
-        # to just shorten the rare long ones.
-        if len(name) <= max_len:
-            return name
-        return name[: max_len - 1].rstrip() + "…"
-
     def _render_browse_meal_card(meal, _rank):
         # _rank is unused -- this is a browsable catalog, not a ranked
         # list, same as the Cocktail page's My Bar cards.
@@ -569,8 +568,12 @@ def _render_browse_meals_tab(meals_df, recipes_df):
             for _, line in recipe_lines.iterrows()
         ]
 
+        # max_len=20 kept explicit here (rather than truncate_title()'s
+        # TITLE_CHARS_PER_LINE=22 default) to preserve this tab's
+        # existing cutoff -- unchanged by moving the helper into
+        # components.py.
         render_metadata_card(
-            _truncate_title(meal["Meal Name"]),
+            truncate_title(meal["Meal Name"], max_len=20),
             badges=badges,
             expander=("Ingredients", expander_lines) if expander_lines else None,
         )

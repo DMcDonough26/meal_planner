@@ -210,7 +210,6 @@ def takeout_controls(meals_df):
         value="West County Center, St. Louis"
     )
 
-
     num_recs = st.sidebar.number_input(
         "How many recommendations?",
         min_value=1,
@@ -309,13 +308,34 @@ BODY_PX_PER_LINE = 22
 TITLE_CHARS_PER_LINE = 22
 
 
+def truncate_title(name: str, max_len: int = TITLE_CHARS_PER_LINE) -> str:
+    """Shortens a title to a single line instead of letting it wrap.
+    Use this for card grids where every title should occupy the same
+    fixed vertical space -- it's the alternative to the wrap-and-pad
+    title_lines approach on render_metadata_card (which keeps the
+    full title visible but needs per-card filler lines to line up a
+    batch). First used on the Browse Meals catalog cards, where only
+    a couple of meal names (e.g. "Salad Kit and Rotisserie Chicken")
+    ran long enough to wrap and stretch the whole grid -- shortening
+    the rare long ones beats reserving two-line height everywhere.
+    Defaults to TITLE_CHARS_PER_LINE so a truncated title always
+    estimates to exactly one wrapped line under
+    _estimate_wrapped_lines()/compute_card_height()."""
+    if not name or len(name) <= max_len:
+        return name
+    return name[: max_len - 1].rstrip() + "…"
+
+
 class CardSizing(NamedTuple):
     """Returned by compute_card_height(). `height` goes to
     render_metadata_card(height=...); `title_lines` goes to
     render_metadata_card(title_lines=...) so the title area reserves
     the same vertical space on every card in the batch and body text
     starts at the same height regardless of how long any one card's
-    title happens to be."""
+    title happens to be. Only meaningful for titles that are allowed
+    to wrap -- callers using truncate_title() on their titles don't
+    need title_lines at all, since a truncated title is always one
+    line."""
     height: int
     title_lines: int
 
@@ -339,7 +359,11 @@ def compute_card_height(
     render_metadata_card() call in the batch, so cards line up instead
     of varying with reasoning-note, name, or attribute-list length.
 
-    title_fn/body_fn extract the relevant text from each item.
+    title_fn/body_fn extract the relevant text from each item. If the
+    caller is truncating titles (see truncate_title()), pass the
+    already-truncated title through title_fn so this sizes off the
+    same one-line titles that will actually render.
+
     extra_lines_fn(item), if given, returns the number of additional
     non-wrapping lines that item's card renders below the body (e.g.
     len(badges) + 1 for a metrics line + 1 for a footer line) -- an
@@ -364,21 +388,34 @@ def compute_card_height(
     return CardSizing(height=height, title_lines=max_title_lines)
 
 
-def compute_day_card_height(days, slot_text_fn, base_px=90, px_per_line=BODY_PX_PER_LINE, chars_per_line=34):
+def compute_day_card_height(days, slot_text_fn, base_px=56, px_per_line=BODY_PX_PER_LINE, chars_per_line=34):
     """Sibling of compute_card_height() for the Meal Plan tab's day
     cards, which don't have a single title+body but a variable number
     of meal-slot lines instead. `days` is a list of per-day slot lists;
     slot_text_fn(slot) returns that slot's rendered line so its wrap
     length can be estimated. Sized to whichever day has the most total
     wrapped lines across its slots, so every day's card -- even ones
-    with fewer or shorter meal names -- ends up the same height."""
+    with fewer or shorter meal names -- ends up the same height.
+
+    base_px is chrome only (container border/padding) -- the day-name
+    title is costed separately via TITLE_PX_PER_LINE, same split as
+    compute_card_height(), rather than folded into one guessed
+    constant. Previously base_px=90 tried to cover padding AND the
+    title AND the slot lines in one number, which came up short: each
+    slot used to render as its own st.markdown() call, and Streamlit's
+    per-element paragraph margin on top of line-height meant the real
+    per-slot cost ran well past px_per_line. render_day_plan_card now
+    renders all of a day's slot lines in a single st.markdown() call
+    with soft line breaks (the same technique used for badges and the
+    title filler lines), so px_per_line alone is an accurate per-line
+    cost again."""
     if not days:
-        return base_px
+        return base_px + TITLE_PX_PER_LINE
     max_lines = max(
         sum(_estimate_wrapped_lines(slot_text_fn(slot), chars_per_line) for slot in day_slots)
         for day_slots in days
     )
-    return base_px + max_lines * px_per_line
+    return base_px + TITLE_PX_PER_LINE + max_lines * px_per_line
 
 
 def render_metadata_card(
@@ -434,7 +471,11 @@ def render_metadata_card(
       batch. Never truncates a longer title (unlike an earlier version
       of this that used a fixed-height sub-container, which could clip
       a title that ran long) -- it only ever adds space, never removes
-      it. Only meaningful alongside height.
+      it. Only meaningful alongside height. Skip this entirely for
+      titles that are already truncated to a fixed length (see
+      truncate_title()) -- a truncated title is always one line, so
+      there's nothing to pad and passing title_lines would only add
+      unneeded filler space above the body.
     top_link: optional ready-made markdown link (e.g.
       "[View recipe](https://...)"), rendered directly under the
       title/badges, before the body -- for cards where the reference
@@ -524,12 +565,24 @@ def render_day_plan_card(day_name: str, slots, height: int | None = None):
     height: fixed card height in px (see compute_day_card_height()),
       so every day's card is the same size regardless of how many
       slots it has or how long its meal names run.
+
+    All slot lines render in a single st.markdown() call with soft
+    line breaks, not one st.markdown() per slot -- matching the same
+    technique used for badges and the title filler lines above. Each
+    separate st.markdown() call carries its own paragraph margin on
+    top of line-height, which compute_day_card_height()'s per-line
+    estimate doesn't budget for; combining into one call keeps the
+    per-line cost predictable (and was the actual cause of the default
+    card height coming up short).
     """
     with st.container(border=True, **({"height": height} if height is not None else {})):
         st.markdown(f"### {day_name}")
 
-        for slot in slots:
-            st.markdown(f"**{slot['icon']} {slot['slot']}:** {slot['meal_name']}")
+        slot_lines = "  \n".join(
+            f"**{slot['icon']} {slot['slot']}:** {slot['meal_name']}" for slot in slots
+        )
+        if slot_lines:
+            st.markdown(slot_lines)
 
 
 def render_card_grid(items, render_fn, num_columns: int = 3):
