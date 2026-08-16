@@ -52,6 +52,7 @@ def write_plan_to_google_sheets(
     plan_df: pd.DataFrame,
     scaled_df: pd.DataFrame,
     grocery_df: pd.DataFrame,
+    selected_df: pd.DataFrame,
     params: dict
 ):
 
@@ -68,6 +69,20 @@ def write_plan_to_google_sheets(
     plan_date = pd.Timestamp.now().strftime("%Y-%m-%d")
 
     # ---------------------------------------------------------
+    # Batches per Meal ID (this is the "Scale Factor" shown on the
+    # Recipes tab's "⚖️ Scale" badge). selected_df can have the same
+    # Meal ID repeated (e.g. it's built from a merge upstream), so
+    # dedupe down to one Scale Factor per Meal ID before joining --
+    # every occurrence of a meal in the week shares the same batch
+    # count, there's no per-slot scaling.
+    # ---------------------------------------------------------
+    batches_lookup = (
+        selected_df[["Meal ID", "Scale Factor"]]
+        .drop_duplicates(subset="Meal ID")
+        .rename(columns={"Scale Factor": "Batches"})
+    )
+
+    # ---------------------------------------------------------
     # Build Weekly Meal Plan export (new schema)
     # ---------------------------------------------------------
     weekly_plan_export = pd.DataFrame({
@@ -80,6 +95,14 @@ def write_plan_to_google_sheets(
         "Leftover Indicator": plan_df["Leftover Indicator"],
         "Notes": ""
     })
+
+    weekly_plan_export = weekly_plan_export.merge(batches_lookup, on="Meal ID", how="left")
+    weekly_plan_export = weekly_plan_export[
+        [
+            "Plan Date", "Meal Day Number", "Meal Day", "Meal Slot", "Meal ID",
+            "Recipe Name", "Batches", "Leftover Indicator", "Notes",
+        ]
+    ]
 
     # ---------------------------------------------------------
     # Write Weekly Meal Plan (overwrite)

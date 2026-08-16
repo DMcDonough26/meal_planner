@@ -457,7 +457,7 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
             st.caption("Public visitors get a download instead of writing to the owner's sheet.")
 
     if save_clicked:
-        write_plan_to_google_sheets(plan_df, scaled_df, grocery_df, params)
+        write_plan_to_google_sheets(plan_df, scaled_df, grocery_df, selected_df, params)
         st.success("Plan saved to Google Sheets!")
 
 
