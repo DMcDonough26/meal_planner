@@ -54,24 +54,36 @@ def sidebar_page_header(title: str):
 
 def planning_controls(meals_df: pd.DataFrame, store_layout_df):
 
+    # Owner mode gets a different set of sidebar defaults tuned to the
+    # owner's actual weekly routine, rather than the generic/blank
+    # defaults public visitors see. Every default below is gated on
+    # this flag individually (not a single early-return) so a visitor
+    # still sees the original neutral defaults untouched.
+    owner_defaults = is_owner_mode()
+
     sidebar_page_header("Meal Plan Settings")
     # -----------------------------
     # Section: Planning Basics
     # -----------------------------
     sidebar_section("Planning Basics")
 
-    days = st.sidebar.number_input("Days to plan", min_value=1, max_value=7, value=7)
+    days = st.sidebar.number_input(
+        "Days to plan", min_value=1, max_value=7, value=5 if owner_defaults else 7
+    )
 
+    WEEKDAY_OPTIONS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     plan_start_day = st.sidebar.selectbox(
         "Plan starts on",
-        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-        index=0
+        WEEKDAY_OPTIONS,
+        index=WEEKDAY_OPTIONS.index("Sunday") if owner_defaults else 0
     )
 
     with st.sidebar:
+        MEAL_PATTERN_OPTIONS = ["Breakfast + Lunch + Dinner", "Lunch + Dinner", "Dinner only"]
         meal_pattern = st.selectbox(
             "Meals per day",
-            ["Breakfast + Lunch + Dinner","Lunch + Dinner","Dinner only"]
+            MEAL_PATTERN_OPTIONS,
+            index=MEAL_PATTERN_OPTIONS.index("Dinner only") if owner_defaults else 0
         )
 
         MEAL_PATTERN_MAP = {
@@ -86,17 +98,25 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
         "Servings per meal", min_value=1, max_value=10, value=3
     )
 
-    bulk_cooks = st.sidebar.number_input("Number of bulk cooks", min_value=1, max_value=7, value=2)
-
-    souper_target = st.sidebar.selectbox(
-        "Souper Cubes Target (extra servings to freeze)",
-        [0, 4, 8],
-        index=1
+    bulk_cooks = st.sidebar.number_input(
+        "Number of bulk cooks", min_value=1, max_value=7, value=3 if owner_defaults else 2
     )
 
+    SOUPER_OPTIONS = [0, 4, 8]
+    souper_target = st.sidebar.selectbox(
+        "Souper Cubes Target (extra servings to freeze)",
+        SOUPER_OPTIONS,
+        index=SOUPER_OPTIONS.index(8) if owner_defaults else 1
+    )
+
+    store_options = list(store_layout_df["Store"].unique())
+    default_store_index = 0
+    if owner_defaults and "Schnucks" in store_options:
+        default_store_index = store_options.index("Schnucks")
     store_name = st.sidebar.selectbox(
         "Which store are you shopping at?",
-        store_layout_df["Store"].unique()
+        store_options,
+        index=default_store_index
     )
 
     # -----------------------------
@@ -105,11 +125,12 @@ def planning_controls(meals_df: pd.DataFrame, store_layout_df):
     sidebar_section("Cooking Days")
 
     ALL_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    OWNER_COOK_DAYS = ["Sunday", "Tuesday", "Thursday"]
 
     cook_days = st.sidebar.multiselect(
         "Which days do you want to cook?",
         ALL_WEEKDAYS,
-        default=ALL_WEEKDAYS,
+        default=OWNER_COOK_DAYS if owner_defaults else ALL_WEEKDAYS,
     )
 
     # -----------------------------
