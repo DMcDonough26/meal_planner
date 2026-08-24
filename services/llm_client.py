@@ -261,9 +261,10 @@ APPROVED_CHEFS = [
     "Frankie Celenza",
     "Ina Garten",
     # "Samin Nosrat",
-    "Deb Perelman"#,
+    "Deb Perelman",
     # "Priya Krishna",
     # "Melissa Clark",
+    "Francis Mallmann"
 ]
 
 # Pre-checked defaults on the Recipe Ideas page -- the original 6-chef list.
