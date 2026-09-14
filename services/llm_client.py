@@ -65,6 +65,28 @@ COST
 - Cost per serving is the primary cost metric.
 - Lower cost per serving is preferred all else equal.
 
+SEASONALITY
+- Some meals are strongly associated with a particular season or
+  holiday period (e.g., pumpkin soup reads as a fall/early-winter
+  dish). Do not recommend a seasonal meal outside its natural season,
+  even if it otherwise scores well on cost, health, taste, or
+  stretchiness -- being seasonally out of place overrides those
+  metrics.
+- Judge seasonality using common-sense culinary reasoning based on
+  params.plan_date, if provided (e.g., a meal centered on pumpkin,
+  winter squash, or similar should generally only be recommended
+  roughly September through December; a meal centered on stone fruit
+  or watermelon should generally only be recommended in summer).
+- If params.plan_date is not provided, do not exclude or penalize
+  any meal on seasonality grounds -- treat all meals as in-season by
+  default rather than guessing.
+- This rule applies across all meal categories (Bulk, Quick Meal,
+  Breakfast, etc.), not just one named meal -- use the reasoning
+  pattern, not a hardcoded list.
+- Note any meal skipped for seasonality reasons in that meal's
+  candidate reasoning; if a meal is deliberately included despite
+  being borderline in-season, you do not need to justify it in Notes.
+
 BINARY FLAGS
 - Freezable: 0/1
 - Drive‑Thru: 0/1
@@ -226,6 +248,8 @@ that fails these checks:
 6. No Lunch slot is Takeout.
 7. No Lunch slot is a bulk-cook meal's first (cook-day, Leftover
    Indicator = 0) appearance.
+8. No recommended meal is seasonally inappropriate for
+   params.plan_date, if that field is provided.
 
 ------------------------------------------------------------
 SECTION 8 — ERROR HANDLING
