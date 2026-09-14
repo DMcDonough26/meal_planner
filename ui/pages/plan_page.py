@@ -276,14 +276,14 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
         # longer needed on the render call below either.
         recipe_card_sizing = compute_card_height(
             card_meal_names,
-            title_fn=lambda name: truncate_title(name),
+            title_fn=lambda name: truncate_title(name, max_len=17),
             body_fn=lambda name: "",
             extra_lines_fn=lambda name: 9,
         )
 
         def _render_plan_recipe_card(recipe_name, rank):
             render_metadata_card(
-                truncate_title(recipe_name),
+                truncate_title(recipe_name, max_len=17),
                 rank=rank,
                 height=recipe_card_sizing.height,
                 badges=_plan_recipe_badges(recipe_name),
