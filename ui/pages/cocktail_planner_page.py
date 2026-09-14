@@ -121,6 +121,7 @@ def _get_cocktail_metadata(cocktail_id, cocktails_df, cocktail_recipes_df):
         "rating": row["Rating"],
         "glassware": row["Glassware"],
         "prep_method": row["Prep Method"],
+        "served": row["Served"],
         "cost_per_serving": cost_per_serving,
         "standard_drinks": standard_drinks,
     }
@@ -313,6 +314,8 @@ def _render_my_bar_tab(cocktails_df, cocktail_recipes_df, cocktail_ingredients_d
             expander_lines.append(f"Glass: {cocktail['Glassware']}")
         if cocktail["Prep Method"]:
             expander_lines.append(f"Prep: {cocktail['Prep Method']}")
+        if cocktail["Served"]:
+            expander_lines.append(f"Served: {cocktail['Served']}")
         for _, line in recipe_lines.iterrows():
             expander_lines.append(f"- {line['Amount']} {line['Drink Unit']} {line['Ingredient Name']}")
         if cocktail["Effort"]:
@@ -541,8 +544,8 @@ def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
         elif response:
             st.subheader("Recommendations")
 
-            # extra_lines_fn approximates badges (up to 5 for a
-            # Tried/Untried cocktail: rating, glassware, method,
+            # extra_lines_fn approximates badges (up to 6 for a
+            # Tried/Untried cocktail: rating, glassware, method, served,
             # standard drinks, cost) + a footer line, plus one line per
             # ingredient (the biggest source of height variance --
             # a 3-ingredient drink and a 6-ingredient one previously
@@ -587,6 +590,8 @@ def _render_plan_tab(workbook, cocktail_ingredients_df, is_owner):
                             badges.append(("🍸 Glassware", str(metadata["glassware"])))
                         if metadata["prep_method"]:
                             badges.append(("🥄 Method", str(metadata["prep_method"])))
+                        if metadata["served"]:
+                            badges.append(("🧊 Served", str(metadata["served"])))
 
                         # Now part of the same attribute list as the rest
                         # of the badges above (same emoji+bold format),
