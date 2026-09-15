@@ -122,34 +122,26 @@ def render_plan_page():
     params = planning_controls(meals_df, store_layout_df)
 
     # ---------------------------------------------------------
-    # Debug panel (main page)
-    # ---------------------------------------------------------
-    # if st.checkbox("Show Debug Data"):
-    #     st.subheader("Params JSON")
-    #     st.code(params)
-
-    #     st.subheader("Meals JSON")
-    #     st.code(meals_df.to_dict(orient="records"))
-
-    #     st.subheader("Recipes JSON")
-    #     st.code(recipes_df.to_dict(orient="records"))
-
-    #     st.subheader("History JSON")
-    #     st.code(history_df.to_dict(orient="records"))
-
-    # ---------------------------------------------------------
-    # Top-level tabs: LLM planning vs. the plain browsable database
-    # (same split as the Cocktail Planner's "Plan a Drink" / "My Bar")
+    # Top-level tabs: LLM planning, the plain browsable database, and
+    # manual mode (pick meals yourself, skip the LLM call entirely --
+    # same "AI vs instant lookup" split as the Cocktail Planner's
+    # "Plan a Drink" / "My Bar" tabs)
     # -- pulled out here, above the generate-plan gate below, so
-    # Browse Meals works even before anyone's clicked Generate Plan.
+    # Browse Meals and Manual Mode work even before anyone's clicked
+    # Generate Plan.
     # ---------------------------------------------------------
-    plan_tab, browse_tab = st.tabs(["📅 Plan a Week", "📘 Browse Meals"])
+    plan_tab, browse_tab, manual_tab = st.tabs(
+        ["📅 Plan a Week", "📘 Browse Meals", "🧺 Manual Mode"]
+    )
 
     with plan_tab:
         _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df)
 
     with browse_tab:
         _render_browse_meals_tab(meals_df, recipes_df)
+
+    with manual_tab:
+        _render_manual_mode_tab(meals_df, recipes_df, store_layout_df, params)
 
 
 def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
@@ -260,20 +252,6 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
                 ("🧽 Cleanup", meta["Cleanup"]),
             ]
 
-        # One shared sizing across BOTH the Bulk and Quick Meal groups
-        # below, so the two category sections line up with each other
-        # too, not just within themselves. Body is empty (these cards
-        # have no reasoning text) -- the 9-line attribute list is what
-        # drives height here, via extra_lines_fn.
-        #
-        # title_fn truncates (truncate_title(), the same single-line
-        # approach used on the Browse Meals cards) instead of the old
-        # wrap-and-pad title_lines approach -- that was leaving a lot
-        # of dead space above the badges on cards with short titles,
-        # since it reserved room for the batch's longest WRAPPED title
-        # rather than just cutting long ones down to size. A truncated
-        # title always estimates to one line, so title_lines is no
-        # longer needed on the render call below either.
         recipe_card_sizing = compute_card_height(
             card_meal_names,
             title_fn=lambda name: truncate_title(name, max_len=17),
@@ -339,17 +317,12 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
         day_numbers = plan_df["Meal Day Number"].unique()
         all_days_slots = {day_number: _day_slots(day_number) for day_number in day_numbers}
 
-        # Every day's card sized to whichever day has the most total
-        # wrapped lines across its slots, so they're all the same
-        # height regardless of slot count or meal-name length.
         day_card_height = compute_day_card_height(
             list(all_days_slots.values()),
             slot_text_fn=lambda slot: f"{slot['slot']}: {slot['meal_name']}",
         )
 
         def _render_day_card(day_number, _rank):
-            # _rank is unused -- calendar days aren't a ranked list, so
-            # no "1." numbering here, unlike the recipe cards above.
             day_df = plan_df[plan_df["Meal Day Number"] == day_number]
             day_name = day_df["Meal Day Name"].iloc[0]
             render_day_plan_card(day_name, all_days_slots[day_number], height=day_card_height)
@@ -470,6 +443,121 @@ def _render_plan_tab(params, meals_df, recipes_df, store_layout_df, history_df):
         st.success("Plan saved to Google Sheets!")
 
 
+def _render_manual_mode_tab(meals_df, recipes_df, store_layout_df, params):
+    """Skip the LLM meal-selection step entirely: the user already knows
+    which meals they're making (typically after using Browse Meals) and
+    just wants the same scaled, aisle-sorted grocery list the LLM flow
+    produces -- consolidating a known set of meals is a deterministic
+    operation, not one that needs an OpenAI call. Mirrors the Cocktail
+    Planner's non-AI "instant lookup" mode."""
+    st.caption(
+        "Already know what you're making? Pick your meals and get a "
+        "grocery list -- no AI call, no API cost."
+    )
+
+    include_staples = st.checkbox(
+        "Automatically include Staples",
+        value=True,
+        key="manual_mode_include_staples",
+    )
+
+    selectable_df = filter_meals_for_planner(meals_df)
+    meal_names = sorted(n for n in selectable_df["Meal Name"].unique() if n)
+
+    selected_names = st.multiselect(
+        "Which meals are you making?",
+        meal_names,
+        key="manual_mode_meal_select",
+    )
+
+    scale_factors = {}
+    if selected_names:
+        st.markdown("#### Batches")
+        st.caption("How many times are you making each recipe?")
+        for name in selected_names:
+            scale_factors[name] = st.number_input(
+                name,
+                min_value=0.5,
+                step=0.5,
+                value=1.0,
+                key=f"manual_mode_scale_{name}",
+            )
+
+    if st.button("Build Grocery List", disabled=not selected_names):
+        selected_df = meals_df[meals_df["Meal Name"].isin(selected_names)].copy()
+        selected_df["Scale Factor"] = selected_df["Meal Name"].map(scale_factors)
+
+        # Staples inclusion is now a user choice, defaulting to on --
+        # same Scale Factor 1 convention as the LLM flow when included.
+        if include_staples:
+            staples_row = meals_df[meals_df["Meal Name"] == "Staples"].copy()
+            if not staples_row.empty:
+                staples_row["Scale Factor"] = 1
+                selected_df = pd.concat([selected_df, staples_row], ignore_index=True)
+
+        scaled_df = build_scaled_df(selected_df, recipes_df, params)
+        grocery_df = build_grocery_df(scaled_df, params, store_layout_df)
+
+        st.session_state.manual_plan_data = {
+            "scaled_df": scaled_df,
+            "grocery_df": grocery_df,
+            "selected_df": selected_df,
+            "params": params,
+        }
+
+    if "manual_plan_data" not in st.session_state:
+        return
+
+    data = st.session_state.manual_plan_data
+    scaled_df = data["scaled_df"]
+    grocery_df = data["grocery_df"]
+    selected_df = data["selected_df"]
+    manual_params = data["params"]
+
+    st.markdown("---")
+    st.markdown("### Grocery List")
+    st.caption("Sorted by aisle order for your selected store.")
+
+    display_cols = [
+        "Section", "Ingredient Name", "Scaled Display Quantity",
+        "Display Unit", "Meal Names"
+    ]
+    st.dataframe(
+        grocery_df[display_cols],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.download_button(
+        "Download Grocery List (CSV)",
+        grocery_df[display_cols].to_csv(index=False),
+        file_name="manual_grocery_list.csv",
+        mime="text/csv",
+        key="manual_mode_download",
+    )
+
+    if is_owner_mode():
+        if st.button("Save to Google Sheets", key="manual_mode_save"):
+            # Manual mode has no day/slot structure -- write one
+            # placeholder "day" per meal so this matches the schema
+            # write_plan_to_google_sheets() expects, and so these meals
+            # show up in History for the LLM planner's no-repeat check.
+            plan_df = pd.DataFrame({
+                "Meal Day Number": 1,
+                "Meal Day Name": "Manual",
+                "Meal Slot": "Manual",
+                "Meal ID": selected_df["Meal ID"],
+                "Meal Name": selected_df["Meal Name"],
+                "Leftover Indicator": "No",
+            })
+            write_plan_to_google_sheets(
+                plan_df, scaled_df, grocery_df, selected_df, manual_params
+            )
+            st.success("Saved to Google Sheets!")
+    else:
+        st.caption("Sign in as the owner to save this to Google Sheets.")
+
+
 def _render_browse_meals_tab(meals_df, recipes_df):
     """Browsable view over the full Meals database -- every meal in the
     sheet, independent of any generated plan. Search/filter/sort only;
@@ -547,8 +635,6 @@ def _render_browse_meals_tab(meals_df, recipes_df):
         return "N/A" if pd.isna(value) else f"{value:g}"
 
     def _render_browse_meal_card(meal, _rank):
-        # _rank is unused -- this is a browsable catalog, not a ranked
-        # list, same as the Cocktail page's My Bar cards.
         cost_value = meal["Cost per Serving"]
         formatted_cost = "N/A" if pd.isna(cost_value) else f"${float(cost_value):.2f}"
 
@@ -568,10 +654,6 @@ def _render_browse_meals_tab(meals_df, recipes_df):
             for _, line in recipe_lines.iterrows()
         ]
 
-        # max_len=20 kept explicit here (rather than truncate_title()'s
-        # TITLE_CHARS_PER_LINE=22 default) to preserve this tab's
-        # existing cutoff -- unchanged by moving the helper into
-        # components.py.
         render_metadata_card(
             truncate_title(meal["Meal Name"], max_len=20),
             badges=badges,
