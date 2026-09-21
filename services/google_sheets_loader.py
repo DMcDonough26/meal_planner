@@ -113,3 +113,27 @@ def load_workbook():
         weekly_plan_df,
         grocery_list_df
     )
+
+# ---------------------------------------------------------
+# Saved Recipe Ideas (feature 1: user-curated "save for later"
+# repository, distinct from the LLM-generated Recipe Ideas flow)
+# ---------------------------------------------------------
+
+SAVED_RECIPE_IDEAS_COLUMNS = ["Idea ID", "Name", "Source", "Link", "Notes", "Date Added", "Status"]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_saved_recipe_ideas():
+    client = _get_client()
+    workbook = client.open(SHEET_NAME)
+    saved_ideas_df = _read_sheet(workbook, "Saved Recipe Ideas")
+
+    # A brand-new sheet with only a header row (no data rows yet) comes
+    # back from get_all_records() as an empty list, which pd.DataFrame()
+    # turns into a DataFrame with NO columns at all -- not just zero
+    # rows. Reconstruct the expected columns in that case so downstream
+    # code (e.g. saved_ideas_df["Idea ID"]) doesn't KeyError before the
+    # user has saved their first idea.
+    if saved_ideas_df.empty:
+        saved_ideas_df = pd.DataFrame(columns=SAVED_RECIPE_IDEAS_COLUMNS)
+
+    return saved_ideas_df

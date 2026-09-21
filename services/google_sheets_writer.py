@@ -44,6 +44,28 @@ def _append_rows(sheet, df: pd.DataFrame):
     for row in rows:
         sheet.append_row(row)
 
+def _generate_next_id(ids: pd.Series, default_prefix: str = "", default_width: int = 0) -> str:
+    """
+    Generate the next ID by incrementing the highest numeric suffix found
+    among existing IDs, reusing that ID's non-numeric prefix (e.g.
+    "M014" -> "M015"). Falls back to default_prefix/default_width padding
+    if no existing IDs parse (e.g. an empty sheet) -- callers that want a
+    nice "I001"-style first ID rather than a bare "1" pass those in.
+    Shared by Meal ID (via _generate_next_meal_id) and Idea ID generation.
+    """
+    ids = ids.dropna().astype(str)
+    best_prefix, best_num, best_width = default_prefix, 0, default_width
+    for val in ids:
+        match = re.match(r"^(\D*)(\d+)$", val.strip())
+        if match:
+            prefix, num_str = match.groups()
+            num = int(num_str)
+            if num > best_num:
+                best_num, best_prefix, best_width = num, prefix, len(num_str)
+    if best_width:
+        return f"{best_prefix}{str(best_num + 1).zfill(best_width)}"
+    return str(len(ids) + 1)
+
 # ---------------------------------------------------------
 # Main entry point called by your button
 # ---------------------------------------------------------
@@ -146,22 +168,7 @@ def write_plan_to_google_sheets(
 # ---------------------------------------------------------
 
 def _generate_next_meal_id(meals_df: pd.DataFrame) -> str:
-    """Generate the next Meal ID by incrementing the highest numeric suffix
-    found among existing IDs, reusing that ID's non-numeric prefix (e.g.
-    "M014" -> "M015"). Falls back to a plain sequential number if no
-    existing IDs parse."""
-    existing_ids = meals_df["Meal ID"].dropna().astype(str)
-    best_prefix, best_num, best_width = "", 0, 0
-    for mid in existing_ids:
-        match = re.match(r"^(\D*)(\d+)$", mid.strip())
-        if match:
-            prefix, num_str = match.groups()
-            num = int(num_str)
-            if num > best_num:
-                best_num, best_prefix, best_width = num, prefix, len(num_str)
-    if best_width:
-        return f"{best_prefix}{str(best_num + 1).zfill(best_width)}"
-    return str(len(existing_ids) + 1)
+    return _generate_next_id(meals_df["Meal ID"])
 
 def write_recipe_idea_to_cookbook(idea: dict, category: str, meals_df: pd.DataFrame) -> str:
     """
@@ -171,6 +178,11 @@ def write_recipe_idea_to_cookbook(idea: dict, category: str, meals_df: pd.DataFr
     "TBD" since new ideas intentionally skip the ranking-attribute
     estimation used elsewhere; the user fills those in after actually
     cooking it. Returns the new Meal ID.
+
+    Used by both the LLM-generated Recipe Ideas tab and the Saved for
+    Later tab -- the caller builds `idea` with the same Name/Source/
+    Link/Blurb shape either way (Saved for Later maps its own "Notes"
+    field into "Blurb" before calling this).
     """
     new_id = _generate_next_meal_id(meals_df)
     row = {col: "TBD" for col in meals_df.columns}
@@ -185,3 +197,44 @@ def write_recipe_idea_to_cookbook(idea: dict, category: str, meals_df: pd.DataFr
     sheet = _get_sheet("Meals")
     _append_rows(sheet, row_df)
     return new_id
+
+# ---------------------------------------------------------
+# Saved Recipe Ideas (feature 1: "save for later" repository)
+# ---------------------------------------------------------
+
+def write_saved_recipe_idea(name: str, source: str, link: str, notes: str, saved_ideas_df: pd.DataFrame) -> str:
+    """
+    Append a new row to the Saved Recipe Ideas sheet -- the user's own
+    manually-entered "save for later" repository (distinct from the
+    LLM-generated Recipe Ideas flow). Status starts as "Saved" and is
+    later flipped to "Added to Cookbook" by mark_saved_recipe_idea_added()
+    once the user promotes it via the same write-back action used for
+    generated ideas. Returns the new Idea ID.
+    """
+    new_id = _generate_next_id(saved_ideas_df["Idea ID"], default_prefix="I", default_width=3)
+    row_df = pd.DataFrame([{
+        "Idea ID": new_id,
+        "Name": name,
+        "Source": source,
+        "Link": link,
+        "Notes": notes,
+        "Date Added": pd.Timestamp.now().strftime("%Y-%m-%d"),
+        "Status": "Saved",
+    }])
+    sheet = _get_sheet("Saved Recipe Ideas")
+    _append_rows(sheet, row_df)
+    return new_id
+
+def mark_saved_recipe_idea_added(idea_id: str, saved_ideas_df: pd.DataFrame):
+    """
+    Flips Status to "Added to Cookbook" for one row in the Saved Recipe
+    Ideas sheet, after write_recipe_idea_to_cookbook() has successfully
+    written that idea into Meals. Overwrites the whole sheet (same
+    approach as write_plan_to_google_sheets) since this sheet is small
+    and gspread has no simple "update one cell by Idea ID" call without
+    first locating the row anyway.
+    """
+    updated_df = saved_ideas_df.copy()
+    updated_df.loc[updated_df["Idea ID"] == idea_id, "Status"] = "Added to Cookbook"
+    sheet = _get_sheet("Saved Recipe Ideas")
+    _overwrite_sheet(sheet, updated_df)
